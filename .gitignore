@@ -1,0 +1,27 @@
+__pycache__
+
+# Compiled binary and object files
+
+bin/
+builds/temp/
+builds/visual_studio/*/temp/
+
+*.dll
+*.exe
+*.lib
+*.obj
+
+# Visual Studio files
+
+.vs/
+.vscode/
+
+*.suo
+*.user
+*.sln.docstates
+*.vcxproj.user
+
+# Vim
+
+*.swp
+

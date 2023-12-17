@@ -1,0 +1,10 @@
+[submodule "dependencies/utf8proc"]
+	path = dependencies/utf8proc
+	url = https://github.com/JuliaStrings/utf8proc.git
+[submodule "dependencies/miniz"]
+	path = dependencies/miniz
+	url = https://github.com/richgel999/miniz
+[submodule "dependencies/libsodium"]
+	path = dependencies/libsodium
+	url = https://github.com/jedisct1/libsodium
+	branch = stable
