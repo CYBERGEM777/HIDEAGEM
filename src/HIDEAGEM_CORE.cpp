@@ -1169,7 +1169,7 @@ bool HideAGem::hide_gem_files_internal(
         ///
         //    WRITE GEM BIT MODE TO OCEAN
 
-        // Encrypt with Sun Key
+        // Encrypt with SHARED_RNG
         const uint8_t encrypted_bit_mode = static_cast<uint8_t>( GEM_BIT_MODE ) ^ SHARED_RNG.rand<uint8_t>();
 
         GhostVector<uint8_t> extra_data = { encrypted_bit_mode };
@@ -2447,9 +2447,6 @@ void HideAGem::write_bit_trap_to_ocean(const uint64_t trap_val)
     //    WRITE BIT TRAP TO OCEAN
     //
     //    Writes only as many bits needed to fit trap_val.
-    //
-    //    The LSBs above the trap bit up to GEM_BIT_MODE bits will be randomized
-    //    in order to make the Bit Trap's bits indistinguishable from Gem Stream bits.
 
     uint64_t bit_index = 0;
 
@@ -2466,7 +2463,7 @@ void HideAGem::write_bit_trap_to_ocean(const uint64_t trap_val)
         // Read ocean 
         uint8_t ocean_byte = read_ocean_byte( ocean_index );
 
-        // Set trap bit in random byte
+        // Set trap bit in ocean byte
         const uint8_t trap_byte = (bit_index == trap_val) ? (ocean_byte | 1) : (ocean_byte & ~1);
 
         // XOR encrypt trap byte with Master Key

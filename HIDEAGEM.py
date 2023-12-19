@@ -166,6 +166,10 @@ def run_hide_gems(args):
                 ocean_mode = 1 # IMAGE_RGB mode
             elif img_mode == "RGBA":
                 ocean_mode = 2 # IMAGE_RGBA mode
+            else:
+                print(f"Unsupported image mode {img_mode}. Exiting.")
+
+                return
 
     else:
         # Load the ocean as a byte array directly
@@ -217,6 +221,10 @@ def run_hide_gems(args):
             img_channels = 3
         elif img_mode == "RGBA":
             img_channels = 4
+        else:
+            print(f"Unsupported image mode {img_mode}. Exiting.")
+
+            return
 
         base_name, _ = os.path.splitext(os.path.basename(args.ocean))  # Ignore the original extension
         output_file_path = os.path.join(args.output, f"{base_name}.png")
