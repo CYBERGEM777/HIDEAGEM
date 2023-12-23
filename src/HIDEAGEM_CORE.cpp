@@ -2981,7 +2981,7 @@ void HideAGem::READ_GEM_SEAL(const DragonRNG::RNGSeed& seed)
             "WAR",
         }},
 
-        { "EARTH", {  // 20
+        { "EARTH", {  // 18
 
             "BINDING",
             "BLOCKING",
@@ -2990,7 +2990,6 @@ void HideAGem::READ_GEM_SEAL(const DragonRNG::RNGSeed& seed)
             "ENDURANCE",
             "FRUITING",
             "GROWING",
-            "GUARDING",
             "GUARDING",
             "HIDING",
             "HUNTING",

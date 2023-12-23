@@ -827,9 +827,7 @@ public:
     // Constructor that initializes with true random seed
     DragonRNG()
     {
-        uint8_t seed[ SEED_SIZE ];
-        TRUE_RANDOM::rand_bytes( &seed, sizeof(seed) );
-        initialize( seed, sizeof(seed) );
+        seed_from_true_random();
     }
 
     // Constructor that initializes with seed of arbitrary size in bytes
@@ -1084,7 +1082,7 @@ public:
         return rand_seed;
     }
 
-    // Replace self with true random RNG
+    // Secure erase self
     void vanish()
     {
         if (sodium_init() < 0)
@@ -1092,7 +1090,6 @@ public:
             return;
         }
 
-        // Securely erase data
         sodium_memzero(seed.data(), seed.size());
         sodium_memzero(nonce.data(), nonce.size());
         sodium_memzero(nonce_ff.data(), nonce_ff.size());
@@ -1139,6 +1136,13 @@ private:
         nonce.fill(0);
         current_block.fill(0);
         offset_in_block = BLOCK_SIZE; // Trigger block load
+    }
+
+    void seed_from_true_random()
+    {
+        uint8_t seed[ SEED_SIZE ];
+        TRUE_RANDOM::rand_bytes( &seed, sizeof(seed) );
+        initialize( seed, sizeof(seed) );
     }
 
     void increment_nonce()
