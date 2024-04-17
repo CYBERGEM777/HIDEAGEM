@@ -13,7 +13,7 @@
 // █  /___ /________\ ___\                                    █   .-.   .-.      '.___.'     █
 // █  \    \        /    /  ASTRAL SOFTWARE FROM THE FUTURE   █  (_  \ /  _)     .'   `.     █
 // █    \   \      /   /                                      █       |         :       :    █
-// █      \  \    /  /      COPYRIGHT 2023 WWW.CYBERGEM.NET   █       |         :       :    █
+// █      \  \    /  /      COPYRIGHT 2024 WWW.CYBERGEM.NET   █       |         :       :    █
 // █        \ \  / /                                          █       |          `.___.'     █
 // █           \/           LET'S DO COMPUTER STUFF ALL DAY   █                              █
 // █                                                          █                              █
@@ -59,6 +59,7 @@
 #include <cstdio>
 #include <thread>
 #include <csignal>
+#include <cstdarg>
 #include <cstring>
 #include <fstream>
 #include <iomanip>
@@ -68,7 +69,12 @@
 
 #define UTF8PROC_STATIC
 #include <utf8proc.h>
-#undef  UTF8PROC_STATIC
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
 
 //
 //    HIDEAGEM CORE
@@ -79,28 +85,24 @@ namespace HideAGemCore {
 ///
 //    HIDEAGEM
 
-HideAGem::HideAGem(
-    void* ocean,
-    uint64_t _ocean_size,
-    EOceanType _ocean_type,
-    OceanBitSet* _ocean_byte_set
-)
+HideAGem::HideAGem( GemOcean& _ocean )
+// TODO initialize all member variables here
 : b_pristine(true)
 , b_validate_read(false)
-, OCEAN(ocean)
-, ocean_size(_ocean_size)
-, ocean_type(_ocean_type)
-, max_ocean_index(ocean_size - 1)
+, OCEAN(_ocean)
+, max_ocean_index(_ocean.size() - 1)
+{}
+
+
+HideAGem::~HideAGem()
 {
-    if (_ocean_byte_set == nullptr)
-    {
-        default_ocean_byte_set = OceanBitSet( ocean, ocean_type, ocean_size );
-        ocean_byte_set = &default_ocean_byte_set;
-    }
-    else
-    {
-        ocean_byte_set = _ocean_byte_set;
-    }
+    erase_sensitive_data();
+}
+
+
+uint64_t HideAGem::get_remaining_byte_capacity() const
+{
+    return OCEAN.remaining_byte_capacity( GEM_BIT_MODE );
 }
 
 ///
@@ -126,7 +128,7 @@ bool HideAGem::init_gem_protocol(const EGemProtocolKey gem_protocol)
 
     GEM_PROTOCOL_KEY = gem_protocol;
 
-    printf("Initialized Gem Protocol %d :: %s \n\n", (int)gem_protocol, GEM_PROTOCOL.NAME.c_str());
+    PRINT("Initialized Gem Protocol %d :: %s", (int)gem_protocol, GEM_PROTOCOL.NAME.c_str());
 
     return true;
 }
@@ -144,7 +146,7 @@ void HideAGem::write_gem_header(const EGemProtocolKey gem_protocol_key)
     }
 
     const GemHeader gem_header =
-        ( static_cast<GemHeader>( HIDEAGEM_VERSION ) & (( 1U << GEM_PROTOCOL_BIT_SIZE ) - 1 ) ) | 
+        ( static_cast<GemHeader>( HIDEAGEM_VERSION_MAJOR ) & (( 1U << GEM_PROTOCOL_BIT_SIZE ) - 1 ) ) | 
         ( static_cast<GemHeader>( gem_protocol_key ) << GEM_PROTOCOL_BIT_SIZE );
 
     // Encrypt Gem Protool Key
@@ -188,6 +190,7 @@ EGemProtocolKey HideAGem::read_gem_header()
         sizeof( encrypted_gem_header ) // Bytes to extract
     );
 
+    // Ghost Vector secure erases itself upon destruction
     GhostVector<GemByte>& extra_stream = bit_collect.get_bytes();
 
     if ( extra_stream.size() == 0 ) // Extracted any bytes ?
@@ -255,7 +258,8 @@ void HideAGem::gen_salt(
         throw _E("Tried to generate salt before GEM_BIT_MODE was initialized.");
     }
 
-    // Data that will be hashed to produce salt
+    // Data that will be hashed to produce salt.
+    // Ghost Vector secure erases itself upon destruction.
     GhostVector<uint8_t> salt_pile;
 
     auto append_uint64 = [&](uint64_t value) // Local function
@@ -268,7 +272,7 @@ void HideAGem::gen_salt(
     };
 
     // Append Ocean size to salt
-    append_uint64( ocean_size );
+    append_uint64( OCEAN.size() );
 
     DragonRNG rng( password ); // RNG seeded with password
     DragonRNG true_random_rng; // True random RNG
@@ -288,7 +292,6 @@ void HideAGem::gen_salt(
         // Randomly corrupt salt bytes (only when hiding Gem, not finding)
         if (!b_lock_ocean_write && true_random_rng.rand_bool( rand_corruption_rate ))
         {
-            // Ghost Vector secure erases itself upon destruction
             const uint8_t corrupt_byte = true_random_rng.rand_byte();
 
             salt_byte = write_bits_to_byte_LSB_MATCHING(
@@ -306,12 +309,12 @@ void HideAGem::gen_salt(
     }
 
     // Hash data into salt
-    if (crypto_generichash(
+    if ( crypto_generichash(
             salt,
             salt_size,
             salt_pile.data(),
             salt_pile.size(),
-            nullptr, 0 ) != 0)
+            nullptr, 0 ) != 0 )
     {
         throw _E("Hashing salt data failed while generating salt.");
     }
@@ -320,11 +323,11 @@ void HideAGem::gen_salt(
 
 void HideAGem::init_master_key(const std::string& password)
 {
-    if (b_keys_initialized) // Keys already initialized ... ?
+    if ( b_keys_initialized ) // Keys already initialized ... ?
     {
         throw _E("Tried to initialize Master Key more than once.");
     }
-    else if (sodium_init() < 0)
+    else if ( sodium_init() < 0 )
     {
         throw _E("libsodium could not be initialized."); // W O A H !
     }
@@ -332,11 +335,6 @@ void HideAGem::init_master_key(const std::string& password)
               sodium_library_version_minor() != REQUIRED_SODIUM_VERSION_MINOR )
     {
         throw _E("libsodium version mismatch."); // Test new versions thoroughly !
-    }
-    else if (password.length() == 0)
-    {
-        // TODO Allow empty passwords ?
-        throw _E("Tried to initialize Master Key with empty password.");
     }
 
     ///
@@ -354,7 +352,7 @@ void HideAGem::init_master_key(const std::string& password)
     // Secure erase normalized password
     sodium_memzero( const_cast<char*>( NORMALIZED_PASSWORD.data() ), NORMALIZED_PASSWORD.size() );
 
-    if (!MASTER_KEY.is_valid())
+    if ( !MASTER_KEY.is_valid() )
     {
         throw _E("Master Key invalid after init.");
     }
@@ -402,15 +400,9 @@ void HideAGem::erase_sensitive_data(const bool b_erase_hash)
 
     GEM_STREAM_ENCRYPT_KEY.vanish();
 
-    default_ocean_byte_set.vanish();
-    ocean_byte_set = nullptr;
-
     GEM_PROTOCOL     = GemProtocol();
     GEM_PROTOCOL_KEY = EGemProtocolKey::NONE;
 
-    OCEAN = nullptr;
-
-    ocean_size      = 0;
     max_ocean_index = 0;
 
     SHARED_RNG.vanish();
@@ -430,60 +422,6 @@ void HideAGem::erase_sensitive_data(const bool b_erase_hash)
         GEM_HASH.clear();
         GEM_SEAL.clear();
     }
-}
-
-///
-//    OCEAN BYTES
-
-uint64_t HideAGem::get_num_ocean_bytes_remaining() const
-{
-    if ( ocean_byte_set == nullptr )
-    {
-        throw _E("ocean_byte_set is nullptr.");
-    }
-
-    switch ( ocean_type )
-    {
-        case EOceanType::BYTES :
-        case EOceanType::IMAGE_RGB :
-
-            return ocean_byte_set->remaining(); // <-- RETURN
-
-        case EOceanType::IMAGE_RGBA :
-        {
-            const uint64_t subtract = ocean_size / 4; // Subtract alpha channel bytes
-            uint64_t rem = ocean_byte_set->remaining();
-            rem = rem > subtract ? rem - subtract : 0; // Prevent underflow
-
-            return rem; // <-- RETURN
-        }
-
-        // --
-
-        default :
-
-            throw _E("get_num_ocean_bytes_remaining() :: Invalid Ocean type.");
-    }
-
-    return ocean_byte_set->remaining();
-}
-
-
-uint64_t HideAGem::get_num_ocean_bytes_reserved() const
-{
-    if ( ocean_byte_set == nullptr )
-    {
-        throw _E("ocean_byte_set vector is nullptr.");
-    }
-
-    return ocean_byte_set->num_set();
-}
-
-
-// Remaining capacity in Ocean based on GEM_BIT_MODE
-uint64_t HideAGem::get_remaining_byte_capacity() const
-{
-    return ( GEM_BIT_MODE * ( get_num_ocean_bytes_remaining() ) ) / 8;
 }
 
 ///
@@ -572,7 +510,8 @@ bool HideAGem::hide_gem_files(
 
         if (!gem_file.is_valid())
         {
-            std::cerr << "ERROR: Could not read file: " << file_path << "\n\n";
+            PRINT_ERROR("ERROR: Could not read file: %s", file_path.c_str());
+            ERROR_CODE = EGemErrorCode::BAD_ARGUMENT;
 
             return false;
         }
@@ -592,38 +531,29 @@ bool HideAGem::hide_gem_files(
 {
     if (!b_pristine)
     {
-        std::cerr << "ERROR: HIDEAGEM instance has already been used." << std::endl;
+        PRINT_ERROR("ERROR: HIDEAGEM instance has already been used.");
+        ERROR_CODE = EGemErrorCode::NOT_PRISTINE;
 
         return false;
     }
     // Ocean
-    else if (OCEAN == nullptr)
+    else if (!OCEAN.is_valid())
     {
-        std::cerr << "ERROR: Ocean is nullptr." << std::endl;
-
-        return false;
-    }
-    else if (ocean_size == 0)
-    {
-        std::cerr << "ERROR: Ocean has size of 0." << std::endl;
+        PRINT_ERROR("ERROR: Ocean is invalid.");
+        ERROR_CODE = EGemErrorCode::BAD_ARGUMENT;
 
         return false;
     }
     // Gem Files
     else if (gem_files.size() == 0)
     {
-        std::cerr << "ERROR: Gem file path is empty." << std::endl;
-
-        return false;
-    }
-    // Password
-    else if (password.length() == 0)
-    {
-        std::cerr << "ERROR: Empty password." << std::endl;
+        PRINT_ERROR("ERROR: Gem file path is empty.");
+        ERROR_CODE = EGemErrorCode::BAD_ARGUMENT;
 
         return false;
     }
 
+    HIDE_TERM_CURSOR();
     INIT_SIGNAL_WATCHERS() // Init system signal watchers (e.g. SIGINT)
 
     ///
@@ -673,8 +603,6 @@ bool HideAGem::hide_gem_files(
     ///
     //    HIDE GEM !!!
 
-    bool b_gem_hide_success = false;
-
     try
     {
         const bool b_hidden = hide_gem_files_internal(gem_files, password);
@@ -686,7 +614,7 @@ bool HideAGem::hide_gem_files(
         
                 if (!b_hidden)
                 {
-                    printf("ERROR: Gem Hide Failure code is NONE but b_hidden is true.\n\n");
+                    PRINT("ERROR: Gem Hide Failure code is NONE but b_hidden is true.");
 
                     goto GEM_HIDE_FAILURE; // E X I T ...
                 }
@@ -707,14 +635,14 @@ bool HideAGem::hide_gem_files(
 
             case EGemErrorCode::DEAD_END:
 
-                printf("Ran out of Ocean bytes!\n\n");
+                PRINT("Ran out of Ocean bytes!");
 
                 goto GEM_HIDE_FAILURE; // E X I T ...
 
             default :
             case EGemErrorCode::UNKNOWN:
 
-                printf("ERROR: UNKNOWN GEM HIDE ERROR CODE !!! \n\n");
+                PRINT("ERROR: UNKNOWN ERROR CODE !!! ");
 
                 goto GEM_HIDE_FAILURE; // E X I T ...
         }
@@ -749,12 +677,12 @@ gem_hide_success:
 
     if (gem_files.size() > 1)
     {
-        printf("\n\033[92m *** HID %llu GEMS IN %.2fs *** \033[0m \n\n",
-            gem_files.size(), time_s); // <3 !!!
+        PRINT_SUCCESS("*** HID %llu GEMS IN %.2fs ***",
+                (uint64_t)gem_files.size(), time_s); // <3 !!!
     }
     else
     {
-        printf("\n\033[92m *** HID A GEM IN %.2fs *** \033[0m \n\n", time_s); // <3 !!!
+        PRINT_SUCCESS("*** HID A GEM IN %.2fs ***", time_s); // <3 !!!
     }
 
     ///
@@ -762,11 +690,15 @@ gem_hide_success:
 
     if (b_validate_read)
     {
-        printf("\033[93m *** STARTING GEM VALIDATION ***\033[0m \n\n");
+        PRINT_WARNING("*** STARTING GEM VALIDATION ***");
+
+        OCEAN.switch_byte_set( GEM_VALIDATION_OCEAN_BYTE_SET_NAME );
 
         const bool b_time_trap = TIME_TRAP_LEVEL != ETimeTrapLevel::NONE;
 
-        HideAGem hag = HideAGem( OCEAN, ocean_size, ocean_type );
+        // TODO create copy of Ocean Bit Set before Gem hide,
+        //      as the set may not have been unused (e.g. multiple passwords per Ocean)
+        HideAGem hag = HideAGem( OCEAN );
         std::vector<GemFile> _gem_files;
 
         hag.b_print_gem_hash = false;
@@ -779,7 +711,7 @@ gem_hide_success:
             case EGemErrorCode::EXIT_SIGNAL :
             case EGemErrorCode::GEM_STREAM_DECOMPRESSION_ABORTED :
 
-                goto EXIT_GEM_HIDE; // E X I T
+                goto GEM_HIDE_FAILURE; // E X I T
 
             default :
 
@@ -788,7 +720,7 @@ gem_hide_success:
 
         if (_gem_files.size() == 0)
         {
-            printf("\033[91m *** ERROR: READ ZERO GEM FILES *** \033[0m \n\n");
+            PRINT_ERROR("*** ERROR: READ ZERO GEM FILES ***");
 
             ERROR_CODE = EGemErrorCode::GEM_VALIDATION_FAILED;
 
@@ -796,7 +728,7 @@ gem_hide_success:
         }
         if (_gem_files.size() != gem_files.size())
         {
-            printf("\033[91m *** ERROR: READ %llu GEM FILES BUT EXPECTED %llu *** \033[0m \n\n", _gem_files.size(), gem_files.size());
+            PRINT_ERROR("*** ERROR: READ %llu GEM FILES BUT EXPECTED %llu ***", (uint64_t)_gem_files.size(), (uint64_t)gem_files.size());
 
             ERROR_CODE = EGemErrorCode::GEM_VALIDATION_FAILED;
 
@@ -815,8 +747,8 @@ gem_hide_success:
                 {
                     if (read_bytes.data()[i] != gem_bytes.data()[i])
                     {
-                        printf("\033[91m *** ERROR: GEM READ BYTES _DO_NOT_ MATCH GEM WRITE BYTES IN GEM FILE %d !!! INDEX: %d ***\n\n  READ: %d   EXPECTED: %d \033[0m \n\n",
-                            g, i, read_bytes.data()[i], gem_bytes.data()[i]);
+                        PRINT_ERROR("*** ERROR: GEM READ BYTES _DO_NOT_ MATCH GEM WRITE BYTES IN GEM FILE %d !!! INDEX: %d ***\n\n  READ: %d   EXPECTED: %d",
+                                g, i, read_bytes.data()[i], gem_bytes.data()[i]);
 
                         ERROR_CODE = EGemErrorCode::GEM_VALIDATION_FAILED;
 
@@ -824,12 +756,13 @@ gem_hide_success:
                     }
                 }
 
-                printf("\033[92m *** GEM %d VALIDATION SUCCESS: ALL BYTES MATCH ***\033[0m \n\n", g + 1);
+                const int gem_num = g + 1;
+                PRINT_SUCCESS("*** GEM %d VALIDATION SUCCESS: ALL BYTES MATCH ***", gem_num);
             }
 
             if (_gem_files.size() > 1)
             {
-                printf("\033[92m *** GEM VALIDATION SUCCESS: ALL GEMS VALIDATED ***\033[0m \n\n");
+                PRINT_SUCCESS("*** GEM VALIDATION SUCCESS: ALL GEMS VALIDATED ***");
             }
         }
     }
@@ -837,45 +770,47 @@ gem_hide_success:
     print_gem_hash();
     PRINT_GEM_SEAL(); // <3
 
-    b_gem_hide_success = true; // <3
-
-    goto EXIT_GEM_HIDE; // E X I T
-
-GEM_HIDE_FAILURE:
-
-    ///
-    //    GEM HIDE FAILED !!!
-
-    if ( ERROR_CODE != EGemErrorCode::EXIT_SIGNAL )
-    {
-        printf("\033[91m *** FAILED TO HIDE GEM *** \033[0m \n\n");
-    }
-
-    b_gem_hide_success = false; // </3
-
-EXIT_GEM_HIDE:
-
     ///
     //    EXIT
 
     erase_sensitive_data(); // Erase keys and other sensitive data
 
-    show_term_cursor();
+    ///
+    //    WARN EMPTY PASSWORD
 
-    return b_gem_hide_success; // E X I T
+    if (password.length() == 0)
+    {
+        PRINT_WARNING("*** WARNING: Used an empty password !!! ***");
+    }
+
+    SHOW_TERM_CURSOR();
+
+    return true; // E X I T <3
+
+GEM_HIDE_FAILURE:
+
+    ///
+    //    EXIT
+
+    // Delete Gem read validation byte set
+    OCEAN.delete_byte_set( GEM_VALIDATION_OCEAN_BYTE_SET_NAME );
+
+    if ( ERROR_CODE != EGemErrorCode::EXIT_SIGNAL )
+    {
+        PRINT_ERROR("*** FAILED TO HIDE GEM ***");
+    }
+
+    SHOW_TERM_CURSOR();
+
+    return false; // E X I T </3
 }
 
 
 bool HideAGem::hide_gem_files_internal(
-    std::vector<GemFile>& gem_files,
-    const std::string& password
-)
+        std::vector<GemFile>& gem_files,
+        const std::string& password
+        )
 {
-    if (ocean_byte_set == nullptr)
-    {
-        throw _E("Tried to hide Gem using nullptr ocean_byte_set vector.");
-    }
-
     ///
     //    VALIDATE GEM PROTOCOL
 
@@ -1007,13 +942,13 @@ bool HideAGem::hide_gem_files_internal(
             throw _E( ERR );
     }
 
-    const uint64_t final_ocean_size = get_num_ocean_bytes_remaining();
+    const uint64_t final_ocean_size = OCEAN.num_bytes_remaining();
 
     if ( gem_stream_final_size > final_ocean_size ) // Over max capacity ?
     {
         ERROR_CODE = EGemErrorCode::NOT_ENOUGH_SPACE;
-        printf("Cannot fit Gem of size %llu bytes in Ocean of size %llu bytes.\n\n", gem_stream_final_size, final_ocean_size);
-        
+        PRINT("Cannot fit Gem of size %llu bytes in Ocean of size %llu bytes.", gem_stream_final_size, final_ocean_size);
+
         throw _E("Not enough space in Ocean.");
     }
 
@@ -1023,31 +958,28 @@ bool HideAGem::hide_gem_files_internal(
     const std::string ocean_size_str = HideAGemCore::bytes_to_size_string( final_ocean_size );
     const std::string gem_size_str   = HideAGemCore::bytes_to_size_string( gem_files_size );
 
-    printf("Hiding %llu %s of total size %s in Ocean of size %llu bytes [ %s ]\n\n",
-            gem_files.size(), gem_files.size() > 1 ? "Gems" : "Gem", gem_size_str.c_str(), final_ocean_size, ocean_size_str.c_str());
+    PRINT("Hiding %llu %s of total size %s", (uint64_t)gem_files.size(), gem_files.size() > 1 ? "Gems" : "Gem", gem_size_str.c_str());
 
     // Print Gem File info
     for (int i = 0; i < gem_files.size(); ++i)
     {
         const auto& gem_file = gem_files[i];
-        const size_t gem_file_size = gem_files_uncompressed_sizes[i];
-        printf("    %s [ %llu bytes ]\n\n", gem_file.name().c_str(), gem_file_size);
+        const uint64_t gem_file_size = gem_files_uncompressed_sizes[i];
+        PRINT_COLOR("CYAN_BRIGHT", " %s \033[97m%llu bytes\033[97m", gem_file.name().c_str(), gem_file_size);
     }
 
-    const std::string gem_stream_final_size_str = // UwU
-        std::to_string(gem_stream_final_size) + " bytes" + (gem_stream_final_size > 1024 ?
-            " [ " + HideAGemCore::bytes_to_size_string(gem_stream_final_size) + " ]" : "");
+    const std::string gem_stream_final_size_str = HideAGemCore::bytes_to_size_string(gem_stream_final_size);
 
     // Print final Gem Stream size and compression ratio
     if ( miniz_compression_ratio > 0 )
     {
-        printf("Final Gem Stream size: %s bytes [ compressed %.2f %% ]\n\n",
+        PRINT("Final Gem Stream size: %s [ compressed %.2f %% ]",
             gem_stream_final_size_str.c_str(), 100 * miniz_compression_ratio
         );
     }
     else
     {   
-        printf("Final Gem Stream size: %s\n\n", gem_stream_final_size_str.c_str());
+        PRINT("Final Gem Stream size: %s", gem_stream_final_size_str.c_str());
     }
 
     ///
@@ -1056,7 +988,7 @@ bool HideAGem::hide_gem_files_internal(
 
     if ( gem_stream_final_size > TEMPORARY_MAX_GEM_SIZE )
     {
-        printf( "Max Gem size exceeded: %llu (temporary limit for alpha testing phase).\n\n", TEMPORARY_MAX_GEM_SIZE );
+        PRINT( "Max Gem size exceeded: %llu (temporary limit for alpha testing phase).", TEMPORARY_MAX_GEM_SIZE );
 
         throw _E( "Exiting." );
     }
@@ -1074,51 +1006,51 @@ bool HideAGem::hide_gem_files_internal(
 
         case EGemProtocolKey::GEMMA_RANDOM :
         case EGemProtocolKey::RUBY_TIME_TRAP :
-        {
-            ///
-            //    GEMMA_RANDOM + AUTO GEM BIT MODE
-
-            // Order from least to greatest capacity
-            GhostVector<EBitMode> auto_bit_modes =
             {
-                _1_BIT,
-                _2_BIT,
-                _3_BIT,
-                _4_BIT,
-                _5_BIT,
-                _6_BIT,
-                _7_BIT,
-                _8_BIT,
-            };
-
-            const uint64_t num_param_bytes      = 8 * GEMMA_RANDOM_PARAMS_SIZE;
-            const uint64_t num_gem_header_bytes = 8 * sizeof( GemHeader );
-
-            for (const auto bit_mode : auto_bit_modes)
-            {
-                GEM_BIT_MODE = bit_mode; // Set to next bit mode
-
                 ///
-                //    SUBRACT FROM TOTAL OCEAN BYTES:
-                //
-                //    - Salt bytes
-                //    - Gem Header bytes (1 bit per byte)
-                //    - GEMMA_RANDOM paramater bytes (1 bit per byte)
+                //    GEMMA_RANDOM + AUTO GEM BIT MODE
 
-                const uint64_t num_ocean_bytes =
-                    get_remaining_byte_capacity() - NUM_SALT_BYTES -
-                    num_gem_header_bytes - num_param_bytes;
-
-                const uint64_t capacity = ( GEM_BIT_MODE * num_ocean_bytes ) / 8;
-
-                if (gem_stream_final_size <= capacity)
+                // Order from least to greatest capacity
+                GhostVector<EBitMode> auto_bit_modes =
                 {
-                    break;
-                }
-            }
+                    _1_BIT,
+                    _2_BIT,
+                    _3_BIT,
+                    _4_BIT,
+                    _5_BIT,
+                    _6_BIT,
+                    _7_BIT,
+                    _8_BIT,
+                };
 
-            break;
-        }
+                const uint64_t num_param_bytes      = 8 * GEMMA_RANDOM_PARAMS_SIZE;
+                const uint64_t num_gem_header_bytes = 8 * sizeof( GemHeader );
+
+                for (const auto bit_mode : auto_bit_modes)
+                {
+                    GEM_BIT_MODE = bit_mode; // Set to next bit mode
+
+                    ///
+                    //    SUBRACT FROM TOTAL OCEAN BYTES:
+                    //
+                    //    - Salt bytes
+                    //    - Gem Header bytes (1 bit per byte)
+                    //    - GEMMA_RANDOM paramater bytes (1 bit per byte)
+
+                    const uint64_t num_ocean_bytes =
+                        get_remaining_byte_capacity() - NUM_SALT_BYTES -
+                        num_gem_header_bytes - num_param_bytes;
+
+                    const uint64_t capacity = ( GEM_BIT_MODE * num_ocean_bytes ) / 8;
+
+                    if (gem_stream_final_size <= capacity)
+                    {
+                        break;
+                    }
+                }
+
+                break;
+            }
 
         default:
 
@@ -1150,7 +1082,7 @@ bool HideAGem::hide_gem_files_internal(
 
     if ( TIME_TRAP_LEVEL != ETimeTrapLevel::NONE )
     {
-        std::cout << " \033[35mCASTING GEM SPELL: LEVEL " << (int)TIME_TRAP_LEVEL << " RUBY TIME TRAP\033[0m\n\n";
+        PRINT_COLOR("MAGENTA", "CASTING GEM SPELL: LEVEL %d RUBY TIME TRAP", (int)TIME_TRAP_LEVEL);
 
         // Write Time Trap using reverse index so that highest levels are first
         write_bit_trap_to_ocean( 7 - static_cast<uint64_t>( TIME_TRAP_LEVEL ) );
@@ -1177,10 +1109,10 @@ bool HideAGem::hide_gem_files_internal(
 
         // Write in 1-bit mode
         if ( !GEMMA_RANDOM_write_bit_stream_to_ocean(
-                extra_stream,               // Bit Stream
-                EBitMode::_1_BIT            // Gem bit mode
-            )
-        )
+                    extra_stream,               // Bit Stream
+                    EBitMode::_1_BIT            // Gem bit mode
+                    )
+           )
         {
             throw _E("Failed to write extra data to Ocean.");
         }
@@ -1206,10 +1138,10 @@ bool HideAGem::hide_gem_files_internal(
         const uint64_t max_bytes = get_remaining_byte_capacity();
         const std::string max_bytes_str = HideAGemCore::bytes_to_size_string( max_bytes );
 
-        printf("Cannot fit Gem of size %llu bytes in Ocean of size %llu bytes using Gem Protocol %s \n\n",
+        PRINT("Cannot fit Gem of size %llu bytes in Ocean of size %llu bytes using Gem Protocol %s ",
                 gem_stream_final_size, max_bytes, GEM_PROTOCOL.NAME.c_str());
 
-        printf("Max capacity for this Ocean and Gem Protocol: %s ( %llu bytes )\n\n", max_bytes_str.c_str(), max_bytes);
+        PRINT("Max capacity for this Ocean and Gem Protocol: %s ( %llu bytes )", max_bytes_str.c_str(), max_bytes);
 
         ERROR_CODE = EGemErrorCode::NOT_ENOUGH_SPACE;
 
@@ -1267,16 +1199,16 @@ bool HideAGem::hide_gem_files_internal(
 
     // Encrypt gem using MASTER_KEY
     const auto _err = crypto_aead_xchacha20poly1305_ietf_encrypt(
-        gem_stream_ptr,
-        &encrypted_len,
-        reinterpret_cast<const unsigned char*>(file_stream_ptr),
-        file_stream_size,
-        nullptr,
-        0, // No additional data
-        nullptr,
-        reinterpret_cast<const unsigned char*>(gem_nonce.data()),
-        reinterpret_cast<const unsigned char*>(GEM_STREAM_ENCRYPT_KEY.data())
-    );
+            gem_stream_ptr,
+            &encrypted_len,
+            reinterpret_cast<const unsigned char*>(file_stream_ptr),
+            file_stream_size,
+            nullptr,
+            0, // No additional data
+            nullptr,
+            reinterpret_cast<const unsigned char*>(gem_nonce.data()),
+            reinterpret_cast<const unsigned char*>(GEM_STREAM_ENCRYPT_KEY.data())
+            );
 
     // Secure erase
     GEM_STREAM_ENCRYPT_KEY.vanish();
@@ -1296,80 +1228,80 @@ bool HideAGem::hide_gem_files_internal(
         //    WRITE STOP VALUE TO END OF GEM STREAM
 
         case EGemProtocolKey::RUBY_TIME_TRAP :
-        {
-            if ( gem_stream.size() < ( READ_STOP_BYTE_COUNT + GEM_STREAM_NONCE_SIZE ))
             {
-                throw _E("Final Gem Stream size smaller than expected.");
+                if ( gem_stream.size() < ( READ_STOP_BYTE_COUNT + GEM_STREAM_NONCE_SIZE ))
+                {
+                    throw _E("Final Gem Stream size smaller than expected.");
+                }
+
+                ///
+                //    WRITE NONCE TO END OF GEM STREAM
+
+                const size_t nonce_offset =
+                    gem_stream.size() - GEM_STREAM_NONCE_SIZE - READ_STOP_BYTE_COUNT;
+
+                // XOR nonce with cipher stream (encrypt) and write to Gem Stream
+                for (int i = 0; i < gem_nonce.size(); ++i)
+                {
+                    gem_stream[ nonce_offset + i ] = gem_nonce[i] ^ SHARED_RNG.rand_byte();
+                }
+
+                gem_nonce.vanish(); // Secure erase
+
+                // In this mode, the Gem Stream head becomes the tail !
+                // The size of the Gem Stream is not known until (and if) it is found.
+
+                for (uint64_t i = gem_stream.size() - READ_STOP_BYTE_COUNT; i < gem_stream.size(); ++i)
+                {
+                    gem_stream[i] = READ_STOP_BYTE_VALUE ^ READ_STOP_BYTES_ENCRYPT_RNG.rand<GemByte>();
+                }
+
+                break;
             }
 
-            ///
-            //    WRITE NONCE TO END OF GEM STREAM
-
-            const size_t nonce_offset =
-                gem_stream.size() - GEM_STREAM_NONCE_SIZE - READ_STOP_BYTE_COUNT;
-
-            // XOR nonce with cipher stream (encrypt) and write to Gem Stream
-            for (int i = 0; i < gem_nonce.size(); ++i)
-            {
-                gem_stream[ nonce_offset + i ] = gem_nonce[i] ^ SHARED_RNG.rand_byte();
-            }
-
-            gem_nonce.vanish(); // Secure erase
-
-            // In this mode, the Gem Stream head becomes the tail !
-            // The size of the Gem Stream is not known until (and if) it is found.
-
-            for (uint64_t i = gem_stream.size() - READ_STOP_BYTE_COUNT; i < gem_stream.size(); ++i)
-            {
-                gem_stream[i] = READ_STOP_BYTE_VALUE ^ READ_STOP_BYTES_ENCRYPT_RNG.rand<GemByte>();
-            }
-
-            break;
-        }
-    
-        // --
+            // --
 
         case EGemProtocolKey::GEMMA_RANDOM :
-        {
-            if ( gem_stream.size() < GEM_STREAM_NONCE_SIZE )
             {
-                throw _E("Final Gem Stream size smaller than expected.");
+                if ( gem_stream.size() < GEM_STREAM_NONCE_SIZE )
+                {
+                    throw _E("Final Gem Stream size smaller than expected.");
+                }
+
+                ///
+                //    WRITE NONCE TO END OF GEM STREAM
+
+                const size_t nonce_offset = gem_stream.size() - GEM_STREAM_NONCE_SIZE;
+
+                // XOR nonce with cipher stream (encrypt) and write to Gem Stream
+                for (int i = 0; i < gem_nonce.size(); ++i)
+                {
+                    gem_stream[ nonce_offset + i ] = gem_nonce[i] ^ SHARED_RNG.rand_byte();
+                }
+
+                gem_nonce.vanish(); // Secure erase
+
+                ///
+                //    WRITE OBFUSCATED BYTE COUNT TO BEGINNING OF GEM STREAM
+
+                // In this mode, the Gem Stream head becomes the tail !
+                // The size of the Gem Stream is not known until (and if) it is found.
+                if ( gem_stream.size() < GEM_STREAM_HEAD_SIZE )
+                {
+                    throw _E("Final Gem Stream size smaller than expected.");
+                }
+
+                const GemSize gem_stream_size = encrypt_gem_stream_byte_count(
+                        static_cast<GemSize>( gem_stream.size() - GEM_STREAM_HEAD_SIZE ),
+                        static_cast<GemSize>( get_remaining_byte_capacity() )
+                        );
+
+                gem_stream.write_bytes_at( gem_stream_size, 0 /* index */ );
+
+                break;
             }
 
-            ///
-            //    WRITE NONCE TO END OF GEM STREAM
-
-            const size_t nonce_offset = gem_stream.size() - GEM_STREAM_NONCE_SIZE;
-
-            // XOR nonce with cipher stream (encrypt) and write to Gem Stream
-            for (int i = 0; i < gem_nonce.size(); ++i)
-            {
-                gem_stream[ nonce_offset + i ] = gem_nonce[i] ^ SHARED_RNG.rand_byte();
-            }
-
-            gem_nonce.vanish(); // Secure erase
-
-            ///
-            //    WRITE OBFUSCATED BYTE COUNT TO BEGINNING OF GEM STREAM
-
-            // In this mode, the Gem Stream head becomes the tail !
-            // The size of the Gem Stream is not known until (and if) it is found.
-            if ( gem_stream.size() < GEM_STREAM_HEAD_SIZE )
-            {
-                throw _E("Final Gem Stream size smaller than expected.");
-            }
-
-            const GemSize gem_stream_size = encrypt_gem_stream_byte_count(
-                static_cast<GemSize>( gem_stream.size() - GEM_STREAM_HEAD_SIZE ),
-                static_cast<GemSize>( get_remaining_byte_capacity() )
-            );
-
-            gem_stream.write_bytes_at( gem_stream_size, 0 /* index */ );
-
-            break;
-        }
-
-        // --
+            // --
 
         default:
 
@@ -1390,21 +1322,21 @@ bool HideAGem::hide_gem_files_internal(
     {
         case EGemProtocolKey::GEMMA_RANDOM :
         case EGemProtocolKey::RUBY_TIME_TRAP :
-        {
-            ///
-            //    WRITE GEM STREAM TO OCEAN
+            {
+                ///
+                //    WRITE GEM STREAM TO OCEAN
 
-            printf("Ocean Write Mode: GEMMA_%dR :: %d-BIT RANDOM\n\n", GEM_BIT_MODE, GEM_BIT_MODE);
+                PRINT("Ocean Write Mode: GEMMA_%dR :: %d-BIT RANDOM", GEM_BIT_MODE, GEM_BIT_MODE);
 
-            // Hide gem !!! <3
-            b_gem_hide_success = GEMMA_RANDOM_write_bit_stream_to_ocean(
-                gem_bit_stream,          // Bit Stream
-                GEM_BIT_MODE,            // Gem bit mode
-                true                     // Print status
-            );
+                // Hide gem !!! <3
+                b_gem_hide_success = GEMMA_RANDOM_write_bit_stream_to_ocean(
+                        gem_bit_stream,          // Bit Stream
+                        GEM_BIT_MODE,            // Gem bit mode
+                        true                     // Print status
+                        );
 
-            break;
-        }
+                break;
+            }
 
         default :
 
@@ -1416,10 +1348,10 @@ bool HideAGem::hide_gem_files_internal(
 
 
 bool HideAGem::GEMMA_RANDOM_write_bit_stream_to_ocean(
-    BitStream& bit_stream,
-    const EBitMode bit_mode,
-    const bool b_print_status
-)
+        BitStream& bit_stream,
+        const EBitMode bit_mode,
+        const bool b_print_status
+        )
 {
     ///
     //    INIT TIME TRAP ( IF APPLICABLE )
@@ -1461,8 +1393,8 @@ bool HideAGem::GEMMA_RANDOM_write_bit_stream_to_ocean(
                 const uint64_t bytes_hidden = gem_bit_index / 8;
                 const float percent_hidden = 100 * (bytes_hidden / (float)bit_stream.get_num_bytes());
 
-                printf(" \033[92mGem => Ocean :: %s [ %.2f %% ]\033[0m \033[K\r",
-                    bytes_to_size_string( bytes_hidden , 1 /* KB max unit */).c_str(), percent_hidden);
+                PRINT_SAME_LINE_COLOR("GREEN_BRIGHT", "Gem => Ocean :: %s [ %.2f %% ]",
+                        bytes_to_size_string( bytes_hidden , 1 /* KB max unit */, false).c_str(), percent_hidden);
 
                 // Reset status print cooldown
                 stats_start_time = std::chrono::high_resolution_clock::now();
@@ -1504,7 +1436,10 @@ bool HideAGem::GEMMA_RANDOM_write_bit_stream_to_ocean(
 
     if (b_print_status)
     {
-        printf("\033[KGem Bytes Hidden: %llu [ 100.00 %% ] \033[K\n", bit_stream.get_num_bytes());
+        PRINT_SAME_LINE_COLOR("GREEN_BRIGHT", "Gem => Ocean :: %s [ 100 %% ]",
+                bytes_to_size_string( bit_stream.get_num_bytes() , 1 /* KB max unit */, false).c_str() );
+
+        std::cout << std::endl << std::endl;
     }
 
     return true;
@@ -1514,44 +1449,34 @@ bool HideAGem::GEMMA_RANDOM_write_bit_stream_to_ocean(
 //    FIND A GEM
 
 uint64_t HideAGem::find_gem_files(
-    const std::string& password,
-    std::vector<GemFile>& out_gem_files,
-    const bool b_time_trap
-)
+        const std::string& password,
+        std::vector<GemFile>& out_gem_files,
+        const bool b_time_trap
+        )
 {
     if (!b_pristine)
     {
-        std::cerr << "ERROR: HideAGem instance has already been used." << std::endl;
+        PRINT_ERROR("ERROR: HideAGem instance has already been used.");
+        ERROR_CODE = EGemErrorCode::BAD_ARGUMENT;
 
         return false;
     }
     // Ocean
-    else if (OCEAN == nullptr)
+    else if (!OCEAN.is_valid())
     {
-        std::cerr << "ERROR: Ocean is nullptr." << std::endl;
-
-        return false;
-    }
-    else if (ocean_size == 0)
-    {
-        std::cerr << "ERROR: Ocean has size of 0." << std::endl;
-
-        return false;
-    }
-    // Password
-    else if (password.length() == 0)
-    {
-        std::cerr << "ERROR: Empty password." << std::endl;
+        PRINT_ERROR("ERROR: Ocean is invalid.");
+        ERROR_CODE = EGemErrorCode::BAD_ARGUMENT;
 
         return false;
     }
 
+    HIDE_TERM_CURSOR();
     INIT_SIGNAL_WATCHERS() // Init system signal watchers (e.g. SIGINT)
 
-    ///
-    //    TIME
+        ///
+        //    TIME
 
-    const auto start_time = std::chrono::high_resolution_clock::now();
+        const auto start_time = std::chrono::high_resolution_clock::now();
 
     ///
     //    INIT VARIABLES
@@ -1575,19 +1500,17 @@ uint64_t HideAGem::find_gem_files(
         find_gem_files( b_time_trap );
 
         // Found Gems !!! <3
-
-        printf("\033[K"); // Clear line
     }
     catch (const _E& e)
     {
-        printf("\033[K"); // Clear line
         std::cerr << e.what() << std::endl << std::endl;
+
 
         switch ( ERROR_CODE )
         {
             case EGemErrorCode::EXIT_SIGNAL :
             case EGemErrorCode::GEM_STREAM_DECOMPRESSION_ABORTED :
-        
+
                 goto EXIT_GEM_FIND; // User chose to abort Gem Stream decompression
 
             default :
@@ -1597,7 +1520,6 @@ uint64_t HideAGem::find_gem_files(
     }
     catch ( ... )
     {
-        printf("\033[K"); // Clear line
         std::cerr << "Unknown exception caught!" << std::endl << std::endl;
 
         goto NO_MAGIC_WORD; // ;D
@@ -1606,81 +1528,100 @@ uint64_t HideAGem::find_gem_files(
     ///
     //    PROCESS GEM FILES
     //
-    //    At this stage, the gem_files vector has been populated with
-    //    with decrypted Gem Files.
-    //
+    //    At this stage, the gem_files vector has been populated with with decrypted Gem Files.
 
     switch ( GEM_PROTOCOL_KEY )
     {
         case EGemProtocolKey::GEMMA_RANDOM :
         case EGemProtocolKey::RUBY_TIME_TRAP :
-        {
-            num_gems = gem_files.size();
-
-            if (num_gems == 0)
             {
-                printf("ERROR: Zero Gem Files extracted.\n\n");
+                num_gems = gem_files.size();
 
-                goto EXIT_GEM_FIND;
-            }
-
-            uint64_t gem_stream_size = 0;
-
-            for (auto& gem_file : gem_files)
-            {
-                // Force unpack, since pack_state == NONE at this stage
-                gem_file.unpack( true /* b_force */ ); // Unpack Gem file
-                gem_stream_size += gem_file.size();
-            }
-
-            const std::string gem_stream_size_str = HideAGemCore::bytes_to_size_string( gem_stream_size );
-            printf("Found and decrypted %llu %s of total size %s: \n\n", num_gems, num_gems > 1 ? "Gems" : "Gem", gem_stream_size_str.c_str());
-
-            // Process Gem Files
-            for (auto& gem_file : gem_files)
-            {
-                if (!gem_file.is_valid())
+                if (num_gems == 0)
                 {
-                    printf("Invalid Gem File while processing Gem Stream.\n\n");
+                    PRINT("ERROR: Zero Gem Files extracted.");
 
                     goto EXIT_GEM_FIND;
                 }
 
-                // Print Gem File info
-                printf("    %s [ %llu bytes ]\n\n", gem_file.name().c_str(), gem_file.size());
+                uint64_t gem_stream_size = 0;
 
-                out_gem_files.push_back( std::move(gem_file) ); // Move Gem File
+                for (auto& gem_file : gem_files)
+                {
+                    // Force unpack, since pack_state == NONE at this stage
+                    gem_file.unpack( true /* b_force */ ); // Unpack Gem file
+                    gem_stream_size += gem_file.size();
+                }
+
+                const std::string gem_stream_size_str = HideAGemCore::bytes_to_size_string( gem_stream_size );
+                PRINT("Found and decrypted %llu %s of total size %s: ", num_gems, num_gems > 1 ? "Gems" : "Gem", gem_stream_size_str.c_str());
+
+                bool b_print_gem_file = true;
+                uint64_t print_counter = 0;
+
+                // Mitigate potential DOS attack that could freeze terminal with
+                // a flood of output (e.g. thousands of lines of Gem Files)
+                if ( num_gems > GEM_FILES_PRINT_ASK_THRESHOLD )
+                {
+                    PRINT_WARNING("Print first %llu Gem Files?\n\nEnter 'no' to extract %llu total Gem Files without printing.", GEM_FILES_PRINT_ASK_THRESHOLD, num_gems);
+                    b_print_gem_file = STDIN_YES_OR_NO(); // <-- Blocks thread
+                }
+
+                // Process Gem Files
+                for (auto& gem_file : gem_files)
+                {
+                    if (!gem_file.is_valid())
+                    {
+                        PRINT("Invalid Gem File while processing Gem Stream.");
+
+                        goto EXIT_GEM_FIND;
+                    }
+
+                    // Print Gem File info
+                    if ( b_print_gem_file )
+                    {
+                        if ( ++print_counter > GEM_FILES_PRINT_ASK_THRESHOLD )
+                        {
+                            PRINT_WARNING("Print more Gem Files?\n\nEnter 'no' to extract %llu total Gem Files without more printing.", num_gems);
+                            b_print_gem_file = STDIN_YES_OR_NO(); // <-- Blocks thread
+                            print_counter = 0;
+                        }
+
+                        PRINT_COLOR("CYAN_BRIGHT", " %s \033[97m%llu bytes\033[0m", gem_file.name().c_str(), gem_file.size());
+                    }
+
+                    out_gem_files.push_back( std::move(gem_file) ); // Move Gem File
+                }
+
+                ///
+                //    TIME
+
+                auto stop_time = std::chrono::high_resolution_clock::now();
+                std::chrono::duration<double> time_duration = stop_time - start_time;
+                const double time_s = time_duration.count();
+
+                if (num_gems == 1)
+                {
+                    PRINT_SUCCESS("*** FOUND A GEM IN %.2fs ***", time_s); // <3 !!!
+                }
+                else
+                {
+                    PRINT_SUCCESS("*** FOUND %llu GEMS IN %.2fs ***", num_gems, time_s); // <3 !!!
+                }
+
+                DragonRNG universe_state_rng = MASTER_KEY.copy_RNG( false /* b_cycle */ );
+                process_final_RNG_state( universe_state_rng ); // Magic <3 !
+
+                print_gem_hash();
+
+                PRINT_GEM_SEAL(); // <3
+
+                break;
             }
-
-            ///
-            //    TIME
-
-            auto stop_time = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<double> time_duration = stop_time - start_time;
-            const double time_s = time_duration.count();
-
-            if (num_gems == 1)
-            {
-                printf("\033[92m *** FOUND A GEM IN %.2fs *** \033[0m \n\n", time_s); // <3 !!!
-            }
-            else
-            {
-                printf("\033[92m *** FOUND %llu GEMS IN %.2fs *** \033[0m \n\n", num_gems, time_s); // <3 !!!
-            }
-
-            DragonRNG universe_state_rng = MASTER_KEY.copy_RNG( false /* b_cycle */ );
-            process_final_RNG_state( universe_state_rng ); // Magic <3 !
-
-            print_gem_hash();
-
-            PRINT_GEM_SEAL(); // <3
-
-            break;
-        }
 
         default :
 
-            printf("Invalid Gem Protocol key: %d \n\n", (int)GEM_PROTOCOL_KEY);
+            PRINT("Invalid Gem Protocol key: %d ", (int)GEM_PROTOCOL_KEY);
 
             goto EXIT_GEM_FIND;
     }
@@ -1689,7 +1630,7 @@ uint64_t HideAGem::find_gem_files(
 
 NO_MAGIC_WORD: // ;D
 
-    printf("\033[91m *** YOU DIDN'T SAY THE MAGIC WORD !!! *** \033[0m \n\n");
+    PRINT_ERROR("*** YOU DIDN'T SAY THE MAGIC WORD !!! ***");
 
     {
         ///
@@ -1699,7 +1640,7 @@ NO_MAGIC_WORD: // ;D
         std::chrono::duration<double> time_duration = stop_time - start_time;
         const double time_s = time_duration.count();
 
-        printf("\033[93m >>> ELAPSED TIME: %.2fs <<< \033[0m \n\n", time_s); // <3 !!!
+        PRINT_WARNING(">>> ELAPSED TIME: %.2fs <<<", time_s); // <3 !!!
     }
 
 EXIT_GEM_FIND:
@@ -1709,7 +1650,7 @@ EXIT_GEM_FIND:
 
     erase_sensitive_data(); // Erase keys and other sensitive data
 
-    show_term_cursor();
+    SHOW_TERM_CURSOR();
 
     return num_gems; // E X I T
 }
@@ -1730,7 +1671,7 @@ void HideAGem::find_gem_files(const bool b_time_trap)
 
         set_time_trap_level( (int)( ocean_time_trap ) ); // Set Time Trap level
 
-        std::cout << " \033[35mGEM ENCHANTMENT: LEVEL " << ocean_time_trap << " RUBY TIME TRAP\033[0m\n\n";
+        PRINT_COLOR("MAGENTA", "GEM ENCHANTMENT: LEVEL %llu RUBY TIME TRAP", ocean_time_trap);
 
         ///
         //    INIT GEM PROTOCOL AND BIT MODE
@@ -1782,11 +1723,13 @@ void HideAGem::find_gem_files(const bool b_time_trap)
             ///
             //    READ GEM STREAM FROM OCEAN
 
-            printf("Ocean Read Mode: GEMMA_%dR :: %d-BIT RANDOM\n\n", GEM_BIT_MODE, GEM_BIT_MODE);
+            PRINT("Ocean Read Mode: GEMMA_%dR :: %d-BIT RANDOM", GEM_BIT_MODE, GEM_BIT_MODE);
 
             // Uses prepared MASTER_KEY to extract from Ocean
             BitCollector bit_collect = GEMMA_RANDOM_extract_gem_bits(
-                GEM_BIT_MODE // Gem bits per Ocean byte
+                GEM_BIT_MODE, // Gem bits per Ocean byte
+                0,            // No max bytes to read
+                true          // Print status
             );
 
             GhostVector<GemByte>& gem_stream = bit_collect.get_bytes();
@@ -1801,7 +1744,7 @@ void HideAGem::find_gem_files(const bool b_time_trap)
             ///
             //    READ GEM STREAM FROM OCEAN
 
-            printf("Ocean Read Mode: GEMMA_%dR :: %d-BIT RANDOM\n\n", GEM_BIT_MODE, GEM_BIT_MODE);
+            PRINT("Ocean Read Mode: GEMMA_%dR :: %d-BIT RANDOM", GEM_BIT_MODE, GEM_BIT_MODE);
 
             // Uses prepared MASTER_KEY to extract from Ocean
             BitCollector bit_collect = GEMMA_RANDOM_extract_gem_bits_TIME_TRAP(
@@ -1928,13 +1871,13 @@ void HideAGem::process_extracted_gem_stream(GhostVector<GemByte>& gem_stream)
         }
         else if ( target_size > BOMB_PATROL_THRESHOLD )
         {
-            printf("\033[93mWARNING: A Gem Stream of size %.2f MB is being decompressed. Do you wish to proceed?",
+            PRINT_WARNING("WARNING: A Gem Stream of size %.2f MB is being decompressed. Do you wish to proceed?",
                 target_size / 1024.f / 1024.f // Last uncompress target size
             );
 
             if ( STDIN_YES_OR_NO() ) // <-- Blocks thread
             {
-                std::cout << "Continuing Gem Stream decompression.\n\n";
+                PRINT("Continuing Gem Stream decompression.");
             }
             else
             {
@@ -2014,7 +1957,8 @@ void HideAGem::process_extracted_gem_stream(GhostVector<GemByte>& gem_stream)
 
 BitCollector HideAGem::GEMMA_RANDOM_extract_gem_bits(
     const EBitMode bit_mode,
-    const uint64_t max_bytes
+    const uint64_t max_bytes,
+    const bool b_print_status
 )
 {
     ///
@@ -2097,26 +2041,39 @@ BitCollector HideAGem::GEMMA_RANDOM_extract_gem_bits(
         ///
         //    STATS
 
-        auto stats_stop_time = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double> stats_cooldown_time = stats_stop_time - stats_start_time;
-
-        if ( search_byte_count > 0 && stats_cooldown_time.count() >= STATUS_PRINT_COOLDOWN_TIME )
+        if ( b_print_status )
         {
-            const size_t num_bytes = bit_collect.get_num_bytes();
-            const float percent_read = 100 * (num_bytes / (float)search_byte_count);
+            auto stats_stop_time = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> stats_cooldown_time = stats_stop_time - stats_start_time;
 
-            const std::string progress_str = bytes_to_size_string( num_bytes) + " / " +
-                bytes_to_size_string( search_byte_count );
+            if ( search_byte_count > 0 && stats_cooldown_time.count() >= STATUS_PRINT_COOLDOWN_TIME )
+            {
+                const size_t num_bytes = bit_collect.get_num_bytes();
+                const float percent_read = 100 * (num_bytes / (float)search_byte_count);
 
-            printf("Reading Gem Stream :: %s [ %.2f %% ]\033[K\r",
-                progress_str.c_str(), percent_read);
+                const std::string progress_str = bytes_to_size_string( num_bytes) + " / " +
+                    bytes_to_size_string( search_byte_count );
 
-            // Reset status print cooldown
-            stats_start_time = std::chrono::high_resolution_clock::now();
+                PRINT_SAME_LINE_COLOR("GREEN_BRIGHT", "Reading Gem Stream :: %s [ %.2f %% ]",
+                    progress_str.c_str(), percent_read);
+
+                // Reset status print cooldown
+                stats_start_time = std::chrono::high_resolution_clock::now();
+            }
         }
     }
 
 extraction_complete:
+
+    if ( b_print_status )
+    {
+        const size_t num_bytes = bit_collect.get_num_bytes();
+        const std::string progress_str = bytes_to_size_string( num_bytes) + " / " +
+            bytes_to_size_string( search_byte_count );
+
+        PRINT_SAME_LINE_COLOR("GREEN_BRIGHT", "Reading Gem Stream :: %s [ 100 %% ]", progress_str.c_str());
+        std::cout << std::endl << std::endl;
+    }
 
     return bit_collect;
 }
@@ -2254,11 +2211,11 @@ BitCollector HideAGem::GEMMA_RANDOM_extract_gem_bits_TIME_TRAP(
 
                 if ( max_time > 0 )
                 {
-                    printf(" \033[92mOcean => Gem :: %s :: Max %.0fs Remaining\033[0m\033[K\r", progress_str.c_str(), max_time );
+                    PRINT_SAME_LINE_COLOR("GREEN_BRIGHT", "Ocean => Gem :: %s ~ %.0fs Remaining", progress_str.c_str(), max_time );
                 }
                 else
                 {
-                    printf(" \033[92mOcean => Gem :: %s\033[0m\033[K\r", progress_str.c_str());
+                    PRINT_SAME_LINE_COLOR("GREEN_BRIGHT", "Ocean => Gem :: %s", progress_str.c_str());
                 }
 
                 // Reset status print cooldown
@@ -2283,6 +2240,12 @@ BitCollector HideAGem::GEMMA_RANDOM_extract_gem_bits_TIME_TRAP(
     }
 
 extraction_complete:
+
+    const size_t num_bytes = bit_collect.get_num_bytes();
+    const std::string progress_str = bytes_to_size_string( num_bytes, 1 /* max unit KB */ );
+    PRINT_SAME_LINE_COLOR("GREEN_BRIGHT", "Ocean => Gem :: %s", progress_str.c_str() );
+
+    printf("\n\n");
 
     return bit_collect;
 }
@@ -2408,9 +2371,7 @@ GemByte HideAGem::read_ocean_byte(const OceanIndex ocean_index) const
         throw  _E("Tried to read byte outside of Ocean bounds!");
     }
 
-    const GemByte* ocean = (GemByte*)OCEAN;
-
-    return ocean[ ocean_index ];
+    return OCEAN[ ocean_index ];
 }
 
 
@@ -2425,8 +2386,7 @@ void HideAGem::write_ocean_byte(const OceanIndex ocean_index, const GemByte& byt
         throw  _E("Tried to write outside of Ocean bounds!");
     }
 
-    GemByte* ocean = (GemByte*)OCEAN;
-    ocean[ ocean_index ] = byte;
+    OCEAN[ ocean_index ] = byte;
 }
 
 ///
@@ -2601,7 +2561,7 @@ void HideAGem::print_gem_hash() const
 {
     if ( b_print_gem_hash )
     {
-        std::cout << "GEM HASH: " << GEM_HASH << "\n";
+        PRINT_NO_NEWLINE("GEM HASH: %s\n", GEM_HASH.c_str());
     }
 }
 
@@ -2973,15 +2933,15 @@ void HideAGem::READ_GEM_SEAL(const DragonRNG::RNGSeed& seed)
             "PROPHESYING",
             "RENEWING",
             "RESURRECTING",
+            "REVEALING",
             "RULING",
-            "SMITHING",
             "TEMPERING",
             "TRANSMUTING",
             "VENGEANCE",
             "WAR",
         }},
 
-        { "EARTH", {  // 18
+        { "EARTH", {  // 19
 
             "BINDING",
             "BLOCKING",
@@ -2998,6 +2958,7 @@ void HideAGem::READ_GEM_SEAL(const DragonRNG::RNGSeed& seed)
             "PERSUADING",
             "PROTECTING",
             "RESISTING",
+            "SMITHING",
             "STABILITY",
             "STRENGTH",
             "TEMPTING",
@@ -3156,15 +3117,15 @@ R"(
   (_  \ /  _) 
        |         %s
        |      
-                 %s)" },
+       |         %s)" },
 
     { "TAURUS",
-R"(    .     .   
-    '.___.'      %s
-    .'   `.   
-   :       :     %s
-   :       :  
-    `.___.'      %s)" },
+R"(     .     .  
+     '.___.'     %s
+     .'   `.   
+    :       :    %s
+    :       :  
+     `.___.'     %s)" },
 
     { "GEMINI",
 R"(
@@ -3191,12 +3152,12 @@ R"(
                  %s)" },
 
     { "VIRGO",
-R"(  _           
- ' `:--.--.      %s
-    |  |  |_  
-    |  |  | )    %s
-    |  |  |/  
-         (J      %s)" },
+R"(   _          
+  ' `:--.--.     %s
+     |  |  |_  
+     |  |  | )   %s
+     |  |  |/  
+          (J     %s)" },
 
     { "LIBRA",
 R"(
@@ -3207,20 +3168,20 @@ R"(
                  %s)" },
 
     { "SCORPIO",
-R"( _            
-' `:--.--.       %s
-   |  |  |    
-   |  |  |       %s
-   |  |  | ..,
-         `--':   %s)" },
+R"(  _           
+ ' `:--.--.      %s
+    |  |  |    
+    |  |  |      %s
+    |  |  | ..,
+          `--':  %s)" },
 
     { "SAGITTARIUS",
 R"(
-         ...     %s
-         .':  
-       .'        %s
-   `..'       
-   .'`.          %s)" },
+          ...    %s
+          .':  
+        .'       %s
+    `..'       
+    .'`.         %s)" },
 
     { "CAPRICORN",
 R"(          _   
@@ -3240,11 +3201,11 @@ R"(
 
     { "PISCES",
 R"(              
-  `-.    .-'     %s
-     :  :     
-   --:--:--      %s
-     :  :     
-  .-'    `-.     %s)" },
+   `-.    .-'    %s
+      :  :     
+    --:--:--     %s
+      :  :     
+   .-'    `-.    %s)" },
 
     };
 
@@ -3284,27 +3245,27 @@ R"(
     const uint64_t GALACTIC_CYCLE = rng.rand();
     const uint64_t ZODIAC_CYCLE   = COSMIC_CYCLE ^ GALACTIC_CYCLE;
 
-    const size_t ZODIAC_IDX   = ZODIAC_CYCLE % ZODIACS.size();
+    const uint32_t ZODIAC_IDX = ZODIAC_CYCLE % ZODIACS.size();
 
-    const std::string ZODIAC  = ZODIACS       .at( ZODIAC_IDX );
-    const std::string PLANET  = PLANET_MAP    .at( ZODIAC );
-    const std::string SYMBOL  = ZODIAC_SYMBOLS.at( ZODIAC );
-    const std::string ELEMENT = ELEMENT_MAP   .at( ZODIAC );
+    const std::string ZODIAC   = ZODIACS       .at( ZODIAC_IDX );
+    const std::string PLANET   = PLANET_MAP    .at( ZODIAC );
+    const std::string SYMBOL   = ZODIAC_SYMBOLS.at( ZODIAC );
+    const std::string ELEMENT  = ELEMENT_MAP   .at( ZODIAC );
 
-    const auto& GEM_WARDS     = GEM_WARDS_MAP.at( ELEMENT );
-    const auto& GEM_MAGICS    = GEM_MAGIC_MAP.at( ELEMENT );
+    const auto& GEM_WARDS      = GEM_WARDS_MAP.at( ELEMENT );
+    const auto& GEM_MAGICS     = GEM_MAGIC_MAP.at( ELEMENT );
 
-    const size_t GEM_IDX      = rng.rand_range( (size_t) NUM_GEM_TYPES        - 1 );
-    const size_t WARD_IDX     = rng.rand_range( (size_t) GEM_WARDS.size()     - 1 );
-    const size_t MAGIC_IDX    = rng.rand_range( (size_t) GEM_MAGICS.size()    - 1 );
-    const size_t QUALITY_IDX  = rng.rand_range( (size_t) GEM_QUALITIES.size() - 1 );
+    const uint32_t GEM_IDX     = rng.rand_range( (uint32_t) NUM_GEM_TYPES        - 1 );
+    const uint32_t WARD_IDX    = rng.rand_range( (uint32_t) GEM_WARDS.size()     - 1 );
+    const uint32_t MAGIC_IDX   = rng.rand_range( (uint32_t) GEM_MAGICS.size()    - 1 );
+    const uint32_t QUALITY_IDX = rng.rand_range( (uint32_t) GEM_QUALITIES.size() - 1 );
 
-    const std::string WARD    = GEM_WARDS [ WARD_IDX  ];
-    const std::string MAGIC   = GEM_MAGICS[ MAGIC_IDX ];
+    const std::string WARD     = GEM_WARDS [ WARD_IDX  ];
+    const std::string MAGIC    = GEM_MAGICS[ MAGIC_IDX ];
 
-    const std::string GEM     = GEM_MAP      .at( ZODIAC      )[ GEM_IDX ];
-    const std::string COLOR   = COLOR_MAP    .at( ZODIAC      );
-    const std::string QUALITY = GEM_QUALITIES.at( QUALITY_IDX );
+    const std::string GEM      = GEM_MAP      .at( ZODIAC      )[ GEM_IDX ];
+    const std::string COLOR    = COLOR_MAP    .at( ZODIAC      );
+    const std::string QUALITY  = GEM_QUALITIES.at( QUALITY_IDX );
 
     ///
     //    MOON
@@ -3343,14 +3304,11 @@ R"(
     ///
     //    CHARM
 
-    const uint8_t TERM_WIDTH = 80; // In chars
-
     std::string GEM_CHARM;
     std::vector<std::string> CHARMS;
 
     const uint64_t MIRACLE_CHARM_LEVEL = 777;
 
-    uint64_t charm_len      = 0;
     uint64_t charm_num      = 0;
     uint64_t charm_level    = 0;
     uint64_t charm_rollover = 0;
@@ -3422,15 +3380,7 @@ R"(
             if ( charm_num < last_sum ) ++charm_rollover; // ROLLOVER
 
             charm += " + ";
-
-            if ( charm.size() + charm_len + SYMBOL_WIDTH > TERM_WIDTH ) // Auto line break
-            {
-                GEM_CHARM += "\n                 ";
-                charm_len = 0;
-            }
-
             GEM_CHARM += charm;
-            charm_len += charm.size();
         }
 
         // Multiply final sum by number of charms raised to the power of charm depth
@@ -3479,9 +3429,37 @@ R"(
         GEM_CHARM.resize( GEM_CHARM.size() - 2 ); // Remove trailing +
     }
 
-    if ( GEM_CHARM.size() > TERM_WIDTH - SYMBOL_WIDTH - charm_header.size() ) // Auto line break
+    // Wrap Gem Charm at width of Gem Legend
+    int wrap_width = GEM_LEGEND.size() - charm_header.size();
+
+    if ( GEM_CHARM.size() > wrap_width ) // Auto line break
     {
-        charm_header += "\n                 ";
+        const std::string WRAP_CHARS = "\n\n                 ";
+        int wrap_idx = wrap_width;
+
+        auto adjustBreakLocation = [&]() // Break on space
+        {
+            while ( wrap_idx > 0 && GEM_CHARM[ wrap_idx - 1] != '+' )
+            {
+                --wrap_idx;
+            }
+
+            ++wrap_idx; // Ensure trailing space is at end of line
+        };
+
+        adjustBreakLocation();
+
+        GEM_CHARM.insert( wrap_idx, WRAP_CHARS);
+        wrap_idx += WRAP_CHARS.size();
+
+        wrap_width = GEM_LEGEND.size(); // Remove Charm header width
+
+        while ( wrap_idx + wrap_width < GEM_CHARM.size() )
+        {
+            wrap_idx += wrap_width;
+            adjustBreakLocation();
+            GEM_CHARM.insert( wrap_idx, WRAP_CHARS);
+        }
     }
 
     GEM_CHARM = charm_header + GEM_CHARM;
@@ -3516,7 +3494,7 @@ R"(
         GEM_CHARM.c_str()
     );
 
-    GEM_SEAL = COLOR + GEM_SEAL + "\033[0m";
+    GEM_SEAL = COLOR + GEM_SEAL;
 
     // He who made the Pleiades and Orion,
     // and turns deep darkness into the morning
@@ -3531,68 +3509,84 @@ R"(
 ///
 //    HIDEAGEM CORE API
 
-EGemErrorCode hide_gems(
+// TODO version of hide_gems() that does not create copy of ocean
+
+// Returns Gem Ocean of out_ocean_size bytes if successful, or nullptr on failure.
+//
+// Caller is responsible for freeing returned Gem Ocean memory.
+GemOcean hide_gems(
     int gem_protocol,
-    void* ocean,
-    uint64_t ocean_size,
-    const EOceanType ocean_type,
+    const void* ocean,
+    const uint64_t ocean_size,
     std::vector<GemFile>& gem_files,
     const std::string& password,
+    int time_trap,
     bool b_validate
 )
 {
     ///
     //    WELCOME TO HIDEAGEM !!!
 
-    print_splash_screen();
+    PRINT_SPLASH_SCREEN();
 
     // Ocean
     if (ocean == nullptr)
     {
-        std::cerr << "ERROR: Ocean is nullptr." << std::endl;
+        PRINT_ERROR("ERROR: Ocean is nullptr.");
 
-        return EGemErrorCode::BAD_ARGUMENT;
+        return GemOcean( EGemErrorCode::BAD_ARGUMENT );
     }
     else if (ocean_size == 0)
     {
         std::cerr << "ERROR: Ocean has size of 0." << std::endl;
 
-        return EGemErrorCode::BAD_ARGUMENT;
+        return GemOcean( EGemErrorCode::BAD_ARGUMENT );
     }
     else if (gem_files.size() == 0)
     {
-        std::cerr << "ERROR: Gem file paths are empty." << std::endl;
+        PRINT_ERROR("ERROR: Gem file paths are empty.");
 
-        return EGemErrorCode::BAD_ARGUMENT;
+        return GemOcean( EGemErrorCode::BAD_ARGUMENT );
+    }
+
+    ///
+    //    INIT SHARED OCEAN
+
+    GemOcean SHARED_OCEAN( ocean, ocean_size );
+
+    if ( ! SHARED_OCEAN.is_valid() )
+    {
+        PRINT_ERROR("Could not initialize Gem Ocean.");
+
+        return GemOcean( EGemErrorCode::INVALID_OCEAN );
     }
 
     ///
     //    HIDE GEMS
 
-    HideAGem hag( ocean, ocean_size, ocean_type );
+    HideAGem hag( SHARED_OCEAN );
 
     const bool b_hid_gem = hag.hide_gem_files(
         gem_protocol,
         gem_files,
         password,
-        -1, // Time Trap level
+        time_trap,
         b_validate
     );
 
-    if (!b_hid_gem)
+    if ( ! b_hid_gem ) // Error ?
     {
-        return hag.get_error_code();
+        return GemOcean( hag.get_error_code() );
     }
 
-    return EGemErrorCode::NONE;
+    return SHARED_OCEAN;
 }
 
 
-EGemErrorCode hide_gems(
+GemOcean hide_gems(
     int gem_protocol,
-    void* ocean,
-    uint64_t ocean_size,
-    const EOceanType ocean_type,
+    const void* ocean,
+    const uint64_t ocean_size,
     const std::vector<std::vector<std::string>>& file_paths,
     const std::vector<std::string>& passwords,
     const std::vector<int> time_traps,
@@ -3602,68 +3596,72 @@ EGemErrorCode hide_gems(
     ///
     //    WELCOME TO HIDEAGEM !!!
 
-    print_splash_screen();
+    PRINT_SPLASH_SCREEN();
 
-    printf("Starting Gem hide with %llu %s.\n\n",
-        passwords.size(), passwords.size() > 1 ? "passwords" : "password");
+    PRINT("Starting Gem hide with %u %s.",
+        (uint32_t)passwords.size(), passwords.size() > 1 ? "passwords" : "password");
 
     // Ocean
     if (ocean == nullptr)
     {
-        std::cerr << "ERROR: Ocean is nullptr." << std::endl;
+        PRINT_ERROR("ERROR: Ocean is nullptr.");
 
-        return EGemErrorCode::BAD_ARGUMENT;
+        return GemOcean( EGemErrorCode::BAD_ARGUMENT );
     }
     else if (ocean_size == 0)
     {
-        std::cerr << "ERROR: Ocean has size of 0." << std::endl;
+        PRINT_ERROR("ERROR: Ocean has size of 0.");
 
-        return EGemErrorCode::BAD_ARGUMENT;
+        return GemOcean( EGemErrorCode::BAD_ARGUMENT );
     }
     // Passwords
     else if (passwords.size() == 0)
     {
-        std::cerr << "ERROR: Empty passwords." << std::endl;
+        PRINT_ERROR("ERROR: Empty passwords.");
 
-        return EGemErrorCode::BAD_ARGUMENT;
+        return GemOcean( EGemErrorCode::BAD_ARGUMENT );
     }
     // File paths
     else if (file_paths.size() == 0)
     {
-        std::cerr << "ERROR: Gem file paths are empty." << std::endl;
+        PRINT_ERROR("ERROR: Gem file paths are empty.");
 
-        return EGemErrorCode::BAD_ARGUMENT;
+        return GemOcean( EGemErrorCode::BAD_ARGUMENT );
     }
     else if (file_paths.size() != passwords.size())
     {
-        std::cerr << "ERROR: Number of passwords does not match number of file path vectors." << std::endl;
+        PRINT_ERROR("ERROR: Number of passwords does not match number of file path vectors.");
 
-        return EGemErrorCode::BAD_ARGUMENT;
+        return GemOcean( EGemErrorCode::BAD_ARGUMENT );
+    }
+
+    ///
+    //    INIT SHARED OCEAN
+
+    GemOcean SHARED_OCEAN( ocean, ocean_size );
+
+    if ( ! SHARED_OCEAN.is_valid() )
+    {
+        PRINT_ERROR("Could not initialize Gem Ocean.");
+
+        return GemOcean( EGemErrorCode::INVALID_OCEAN );
     }
 
     ///
     //    HIDE GEMS
-
-    // Remaining Ocean bytes shared between all Gem layers
-    OceanBitSet ocean_byte_set = OceanBitSet( ocean, ocean_type, ocean_size );
 
     // Hide Gems at all password layers
     for (int i = 0; i < passwords.size(); ++i)
     {
         if (passwords.size() > 1)
         {
-            const size_t num_gem_files = file_paths[i].size();
+            const uint64_t num_gem_files = file_paths[i].size();
 
-            printf("Password %d: Hiding %llu Gem %s \n\n",
+            PRINT("Password %d: Hiding %llu Gem %s ",
                 i + 1, num_gem_files, num_gem_files > 1 ? "Files" : "File");
         }
 
-        HideAGem hag(
-            ocean,
-            ocean_size,
-            ocean_type,
-            &ocean_byte_set
-        );
+        HideAGem hag( SHARED_OCEAN );
 
         const int time_trap = i < time_traps.size() ? time_traps[i] : -1;
 
@@ -3675,20 +3673,19 @@ EGemErrorCode hide_gems(
             b_validate
         );
 
-        if (!b_hid_gem)
+        if ( ! b_hid_gem ) // Error ?
         {
-            return hag.get_error_code();
+            return GemOcean( hag.get_error_code() );
         }
     }
 
-    return EGemErrorCode::NONE;
+    return SHARED_OCEAN;
 }
 
 
 std::vector<GemFile> find_gems(
-    void* ocean, 
+    const void* ocean, 
     uint64_t ocean_size,
-    const EOceanType ocean_type,
     const std::vector<std::string>& passwords,
     const std::string* output_dir,
     const std::vector<bool> time_traps
@@ -3697,34 +3694,41 @@ std::vector<GemFile> find_gems(
     ///
     //    WELCOME TO HIDEAGEM !!!
 
-    print_splash_screen(); // It's Ocean time !!!
-
-    const std::string ocean_size_str = HideAGemCore::bytes_to_size_string( ocean_size );
-    printf("Starting Gem search in Ocean of size %llu bytes [ %s ]\n\n", ocean_size, ocean_size_str.c_str());
-
-    // Remaining Ocean bytes shared between all gem layers
-    OceanBitSet ocean_byte_set = OceanBitSet( ocean, ocean_type, ocean_size );
+    PRINT_SPLASH_SCREEN(); // It's Ocean time !!!
 
     std::vector<GemFile> gem_files;
+
+    ///
+    //    INIT SHARED OCEAN
+
+    GemOcean SHARED_OCEAN( ocean, ocean_size );
+
+    if ( ! SHARED_OCEAN.is_valid() )
+    {
+        PRINT_ERROR("Could not initialize Ocean.");
+
+        return gem_files;
+    }
+
+    ///
+    //    FIND GEMS !!!
+
+    const std::string ocean_size_str = HideAGemCore::bytes_to_size_string( SHARED_OCEAN.size() );
+    PRINT("Starting Gem search in Ocean of size %llu bytes [ %s ]", SHARED_OCEAN.size(), ocean_size_str.c_str());
 
     const auto start_time = std::chrono::high_resolution_clock::now();
 
     // For each password, search for gem files in ocean
-    for (size_t i = 0; i < passwords.size(); ++i)
+    for (uint64_t i = 0; i < passwords.size(); ++i)
     {
         if (passwords.size() > 1)
         {
-            printf("Searching with password %llu.\n\n", i + 1);
+            PRINT("Searching with password %llu.", i + 1);
         }
 
         try
         {
-            HideAGem hag(
-                ocean,
-                ocean_size,
-                ocean_type,
-                &ocean_byte_set
-            );
+            HideAGem hag( SHARED_OCEAN );
 
             const bool b_time_trap = i < time_traps.size() ? time_traps[i] : false;
 
@@ -3736,7 +3740,7 @@ std::vector<GemFile> find_gems(
 
             if (num_found > 0)
             {
-                printf("Found %llu %s with password %llu \n\n",
+                PRINT("Found %llu %s with password %llu ",
                     num_found, num_found > 1 ? "Gems" : "Gem", i + 1);
 
                 continue; // Success !
@@ -3768,7 +3772,7 @@ std::vector<GemFile> find_gems(
         }
         catch( ... )
         {
-            printf("Caught unknown exception!\n\n");
+            PRINT("Caught unknown exception!");
 
             break;
         }
@@ -3782,7 +3786,7 @@ std::vector<GemFile> find_gems(
 
     if ( gem_files.size() == 0 ) // WOW REKT !!! >_< </3
     {
-        printf("\033[91m *** FOUND ZERO GEM FILES *** \033[0m \n\n");
+        PRINT_ERROR("*** FOUND ZERO GEM FILES ***");
 
         goto NO_MAGIC_WORD; // </3 !
     }
@@ -3791,7 +3795,7 @@ std::vector<GemFile> find_gems(
 
     if ( output_dir == nullptr )
     {
-        printf("\033[93mNo output directory specified. Nothing saved to disk.\033[0m\n\n");
+        PRINT_WARNING("No output directory specified. Nothing saved to disk.");
 
         goto GEM_FIND_SUCCESS; // Done !
     }
@@ -3807,31 +3811,30 @@ std::vector<GemFile> find_gems(
 
     if ( ! std::filesystem::exists( save_path ) ) // Create output directory ?
     {
-        printf("\033[93mCreate directory %s and save %llu Gem %s ?\033[0m", save_path.c_str(),
-            gem_files.size(), gem_files.size() > 1 ? "Files" : "File" );
+        PRINT_WARNING("Create directory %s and save %llu Gem %s ?", save_path.c_str(),
+            (uint64_t)gem_files.size(), gem_files.size() > 1 ? "Files" : "File" );
 
         if ( STDIN_YES_OR_NO() ) // <-- Blocks thread
         {
-            std::cout << "Creating directory: " << save_path << "\n\n";
-
+            PRINT("Creating directory: %s", save_path.c_str());
             std::filesystem::create_directories( save_path );
         }
         else
         {
-            std::cout << "Output directory not created. No Gem Files saved to disk.\n\n";
+            PRINT("Output directory not created. No Gem Files saved to disk.");
 
             goto GEM_FIND_SUCCESS;
         }
     }
     else
     {
-        printf("\033[93mSave %llu Gem %s to directory %s ?",
-            gem_files.size(), gem_files.size() > 1 ? "Files" : "File", save_path.c_str()
+        PRINT_WARNING("Save %llu Gem %s to directory %s ?",
+            (uint64_t)gem_files.size(), gem_files.size() > 1 ? "Files" : "File", save_path.c_str()
         );
 
         if ( ! STDIN_YES_OR_NO() ) // <-- Blocks thread
         {
-            std::cout << "No Gem Files saved to disk.\n\n";
+            PRINT("No Gem Files saved to disk.");
 
             goto GEM_FIND_SUCCESS;
         }
@@ -3841,7 +3844,7 @@ std::vector<GemFile> find_gems(
 
     if ( ! std::filesystem::is_directory( save_path ) ) // Is destination a directory ?
     {
-        printf("\033[91mInvalid output directory (not a directory): %s \033[0m\n\n", save_path.c_str());
+        PRINT_ERROR("Invalid output directory (not a directory): %s", save_path.c_str());
 
         goto GEM_FIND_SUCCESS;
     }
@@ -3885,7 +3888,7 @@ std::vector<GemFile> find_gems(
         out_file.write(reinterpret_cast<const char*>(gem_file.data()), gem_file.size());
         out_file.close();
 
-        printf("Saved file: %s \n", file_path.c_str());
+        PRINT_NO_NEWLINE("Saved file: %s \n", file_path.c_str());
     }
 
     printf("\n");
@@ -3898,18 +3901,232 @@ GEM_FIND_SUCCESS:
 
     if (time_m < 1)
     {
-        printf("\033[92m *** FOUND %llu GEM %s IN %.2fs *** \033[0m \n\n",
-            gem_files.size(), files_str, time_s);
+        PRINT_SUCCESS("*** FOUND %llu GEM %s IN %.2fs ***",
+            (uint64_t)gem_files.size(), files_str, time_s);
     }
     else
     {
-        printf("\033[92m *** FOUND %llu GEM %s IN %llum %.2fs *** \033[0m \n\n",
-            gem_files.size(), files_str, time_m, time_s);
+        PRINT_SUCCESS("*** FOUND %llu GEM %s IN %llum %.2fs ***",
+            (uint64_t)gem_files.size(), files_str, time_m, time_s);
     }
 
 NO_MAGIC_WORD:
 
     return gem_files; // E X I T
+}
+
+///
+//    GEM OCEAN
+
+GemOcean::GemOcean(const void* source_ocean, const uint64_t source_ocean_size)
+{
+    if ( source_ocean == nullptr )
+    {
+        PRINT_ERROR("Tried to create Gem Ocean with nullptr source_ocean.");
+
+        return;
+    }
+    else if ( source_ocean_size == 0 )
+    {
+        PRINT_ERROR("Tried to create Gem Ocean with source_ocean_size == 0.");
+
+        return;
+    }
+
+    const int desired_channels = 0; // Zero copies channels from source
+    const std::string ocean_size_str = bytes_to_size_string(source_ocean_size);
+
+    ocean = static_cast<uint8_t*>(
+        stbi_load_from_memory(
+            static_cast<const stbi_uc*>(source_ocean), source_ocean_size, &_width, &_height, &_channels, desired_channels
+        )
+    );
+
+    if ( ocean != nullptr ) // OCEAN is image
+    {
+        // Set OCEAN type
+        switch ( _channels )
+        {
+            case 1: // Grayscale or PNG8 (indexed color)
+
+                _type = EOceanType::IMAGE_GRAYSCALE;
+
+                break;
+
+            case 3: // RGB
+
+                _type = EOceanType::IMAGE_RGB;
+
+                break;
+
+            case 4: // RGBA
+
+                _type = EOceanType::IMAGE_RGBA;
+
+                break;
+
+            default:
+            {
+                // TODO test other image types
+
+                stbi_image_free( ocean ); // Free memory
+                PRINT_ERROR("Unsupported number of image color channels: %d", _channels);
+
+                return; // E X I T
+            }
+        }
+
+        _size = static_cast<size_t>( _width * _height * _channels );
+
+        PRINT("Loaded Ocean of size %s as image with %d color %s.", ocean_size_str.c_str(), _channels, _channels > 1 ? "channels" : "channel");
+    }
+    else // Not an image: Copy source ocean into OCEAN
+    {
+        _width = 0;
+        _height = 0;
+        _channels = 0;
+
+        ocean = ( uint8_t* ) malloc( source_ocean_size );
+        std::memcpy( ocean, source_ocean, source_ocean_size );
+
+        _size = source_ocean_size;
+        _type = EOceanType::BYTES;
+
+        PRINT("Loaded Ocean of size %s as raw bytes.", ocean_size_str.c_str());
+    }
+
+    // Init OCEAN byte set
+    switch_byte_set( DEFAULT_BYTE_SET_KEY );
+}
+
+
+GemOcean::~GemOcean()
+{
+    vanish();
+}
+
+
+uint64_t GemOcean::size() const
+{
+    switch ( _type )
+    {
+        case EOceanType::BYTES :
+        case EOceanType::IMAGE_RGB :
+        case EOceanType::IMAGE_GRAYSCALE :
+
+            return _size;
+
+        case EOceanType::IMAGE_RGBA :
+
+            // Subtract alpha channel bytes
+            return _size - ( _size / 4 );
+
+        default :
+
+            throw _E("GemOcean :: size() :: Unsupported Ocean type.");
+    }
+
+    return _size;
+}
+
+
+bool GemOcean::is_valid() const
+{
+    return ocean != nullptr && _size > 0;
+}
+
+
+// Caller becomes responsible for freeing Ocean memory!
+uint8_t* GemOcean::take()
+{
+    uint8_t* taking_ocean = ocean;
+    ocean = nullptr;
+
+    return taking_ocean;
+}
+
+
+void GemOcean::finalize()
+{
+    if ( ocean == nullptr )
+    {
+        throw _E("Tried to finalize nullptr Gem Ocean.");
+    }
+    else if ( b_finalized )
+    {
+        throw _E("Tried to finalize Gem Ocean that is already finalized.");
+    }
+
+    b_finalized = true;
+
+    switch ( _type )
+    {
+        case EOceanType::IMAGE_RGB :
+        case EOceanType::IMAGE_RGBA :
+        case EOceanType::IMAGE_GRAYSCALE :
+
+            // Save as PNG image below ...
+
+            break;
+
+        default :
+
+            return; // E X I T
+    }
+
+    ///
+    //    WRITE OCEAN DATA TO PNG IMAGE FILE IN MEMORY
+
+    int png_size = 0;
+
+    uint8_t* png_data = static_cast<uint8_t*>(
+        stbi_write_png_to_mem( ocean, _width * _channels, _width, _height, _channels, &png_size)
+    );
+
+    if (sodium_init() < 0)
+    {
+        free( ocean );
+        ocean = nullptr;
+
+        throw _E("Failed to finalize GemOcean: libsodium could not be initialized.");
+    }
+
+    sodium_memzero( ocean, _size ); // Secure erase
+    free( ocean );                  // Free Ocean memory
+
+    ocean = png_data; // Replace Ocean with PNG file bytes
+    _size = png_size; // Update size in bytes
+    _type = EOceanType::BYTES; // Set type to BYTES so size() will return correct size
+}
+
+
+void GemOcean::vanish()
+{
+    _width = 0;
+    _height = 0;
+    _channels = 0;
+    _type = EOceanType::BYTES;
+
+    byte_set_map.clear();
+
+    if ( ocean != nullptr )
+    {
+        if (sodium_init() < 0)
+        {
+            _size = 0;
+            free( ocean );
+            ocean = nullptr;
+
+            throw _E("Failed to vanish GemOcean: libsodium could not be initialized.");
+        }
+
+        // Secure erase
+        sodium_memzero( ocean, _size );
+        free( ocean );
+        ocean = nullptr;
+    }
+
+    _size = 0;
 }
 
 ///
@@ -3925,15 +4142,13 @@ bool GemFile::pack()
     {
         throw _E("ERROR: GemFile::pack() :: libsodium could not be initialized.");
     }
-
-    if (pack_state == PackState::PACKED)
+    else if (pack_state == PackState::PACKED)
     {
         return true; // Already packed
     }
-
-    if (_name.size() > MAX_NAME_LEN)
+    else if (_name.size() > MAX_NAME_LEN)
     {
-        std::cout << "WARNING: GemFile::pack() :: File name exceeds 255 characters and will be truncated to first 255 chars.\n\n";
+        PRINT_WARNING("WARNING: GemFile::pack() :: File name exceeds 255 characters and will be truncated to first 255 chars.");
     }
 
     // TODO preserve file extension when truncating
@@ -4155,26 +4370,25 @@ bool miniz_decompress
 ///
 //    UTILITIES
 
-std::string bytes_to_size_string(uint64_t size, int max_unit_index)
+std::string bytes_to_size_string(const uint64_t size, const int max_unit_index, const bool b_decimal)
 {
-    const char* units[] = {" bytes", " KB", " MB", " GB", " TB"};
-    int unit_index = 0;
+    constexpr std::array<const char*, 5> units = {" bytes", " KB", " MB", " GB", " TB"};
 
-    // Divide size until it's smaller than 1024 or we reach TB
-    while (size >= 1024 && unit_index < max_unit_index)
+    int unit_index = 0;
+    uint64_t unit_size = size;
+
+    while (unit_size >= 1024 && unit_index < max_unit_index && unit_index < units.size())
     {
-        size /= 1024;
+        unit_size /= 1024;
         ++unit_index;
     }
 
-    // No need to calculate the decimal part for bytes
-    if (unit_index == 0)
+    if (unit_index == 0 || !b_decimal)
     {
-        return std::to_string(size) + units[unit_index];
+        return std::to_string(unit_size) + units[unit_index];
     }
 
     // Calculating integer and decimal parts for sizes in KB and above
-    uint64_t integer_part = size;
     uint64_t scale = 1;
 
     for (int i = 0; i < unit_index; i++)
@@ -4182,8 +4396,8 @@ std::string bytes_to_size_string(uint64_t size, int max_unit_index)
         scale *= 1024;
     }
 
-    uint64_t originalSize = size * scale;
-    uint64_t remainder = originalSize - (integer_part * scale);
+    uint64_t integer_part = size / scale;
+    uint64_t remainder = size % scale;
     uint64_t decimal_part = (remainder * 100) / scale;
 
     std::string formatted_size = std::to_string(integer_part);
@@ -4191,6 +4405,10 @@ std::string bytes_to_size_string(uint64_t size, int max_unit_index)
     if (decimal_part > 0)
     {
         formatted_size += std::string(".") + (decimal_part < 10 ? "0" : "") + std::to_string(decimal_part);
+    }
+    else
+    {
+        formatted_size += std::string(".00");
     }
 
     formatted_size += units[unit_index];
@@ -4250,20 +4468,9 @@ bool RUN_UNIT_TESTS(bool b_loop, bool b_demo_mode)
 
     constexpr int    start_protocol   = 0;
     constexpr int    end_protocol     = 0;
-    constexpr int    bytes_cap_pad    = 300;
     constexpr size_t min_password_len = 1;
     constexpr size_t max_password_len = 1024;
-    constexpr size_t file_name_len    = 48;
-
-    const uint64_t start_byte = 1;
-    const uint64_t ocean_size = 1024 * 10; // 10 KB
-    GhostVector<uint8_t> ocean_vec( ocean_size );
-    uint8_t* ocean = ocean_vec.data();
-
-    ///
-    //    BEGIN UNIT TESTS
-
-    printf("\n%s\n\n", b_demo_mode ? " !!! HIDEAGEM DEMO MODE <3 !!!" : "BEGIN HIDEAGEM UNIT TESTS");
+    constexpr size_t file_name_len    = 43;
 
     DragonRNG rng; // True random RNG
 
@@ -4302,6 +4509,11 @@ bool RUN_UNIT_TESTS(bool b_loop, bool b_demo_mode)
     {
         const int demo_time_ms = 6000;
 
+        const uint64_t start_byte = 311111;
+        const uint64_t ocean_size = 1024 * 350; // 350 KB
+        GhostVector<uint8_t> ocean_vec( ocean_size );
+        uint8_t* ocean = ocean_vec.data();
+
         ///
         //    SINGLE PASSWORD + SINGLE FILE
 
@@ -4319,22 +4531,21 @@ bool RUN_UNIT_TESTS(bool b_loop, bool b_demo_mode)
             //    HIDE GEMS
             //
 
-            auto err = hide_gems(
+            auto gem_ocean = hide_gems(
                 0, // Auto Gem Protocol
                 ocean,
                 ocean_size,
-                EOceanType::BYTES,
                 gem_files,
                 rand_password()
             );
 
-            if (err == EGemErrorCode::NOT_ENOUGH_SPACE)
+            if (gem_ocean.get_error() == EGemErrorCode::NOT_ENOUGH_SPACE)
             {
                 gem_bytes = 0; // Restart demo cycle !
 
                 continue;
             }
-            else if (err != EGemErrorCode::NONE)
+            else if (gem_ocean.get_error() != EGemErrorCode::NONE)
             {
                 return false; // E X I T...
             }
@@ -4361,12 +4572,17 @@ bool RUN_UNIT_TESTS(bool b_loop, bool b_demo_mode)
 
 UNIT_LOOP:
 
+    ///
+    //    BEGIN UNIT TESTS
+
+    PRINT("\nBEGIN HIDEAGEM UNIT TESTS");
+
     //
     //    CYCLE KEY
     //
 
     /*    <--  DISABLE
-    printf("BEGINNING CYCLE KEY UNIT TESTS \n\n");
+    PRINT("BEGINNING CYCLE KEY UNIT TESTS ");
 
     const int num_keys = max_password_len - min_password_len + 1;
 
@@ -4397,14 +4613,14 @@ UNIT_LOOP:
         catch (const _E& e)
         {
             std::cerr << e.what() << std::endl << std::endl;
-            printf("\033[91m *** FAILED TO GENERATE CYCLE KEY *** \033[0m \n\n");
+            PRINT_ERROR("*** FAILED TO GENERATE CYCLE KEY ***");
             b_key_error = true;
         }
         catch ( ... )
         {
-            printf(" *** UNKNOWN ERROR *** \n\n");
-            printf("\033[91m *** FAILED TO GENERATE CYCLE KEY *** \033[0m \n\n");
             b_key_error = true;
+            PRINT_ERROR("*** UNKNOWN ERROR *** ");
+            PRINT_ERROR("*** FAILED TO GENERATE CYCLE KEY ***");
         }
     });
 
@@ -4418,15 +4634,15 @@ UNIT_LOOP:
     time_duration = stop_time - start_time;
     time_s = time_duration.count();
 
-    printf("Took %.4f seconds to generate %d keys in parallel.\n\n", time_s, num_keys);
+    PRINT("Took %.4f seconds to generate %d keys in parallel.", time_s, num_keys);
 
-    printf("CYCLE KEY UNIT TESTS COMPLETE !!!\n\n");
+    PRINT_SUCCESS("CYCLE KEY UNIT TESTS COMPLETE !!!");
 
     //
     //    GEM FILE
     //
 
-    printf("BEGINNING GEM FILE UNIT TESTS \n\n");
+    PRINT("BEGINNING GEM FILE UNIT TESTS ");
 
     for (size_t file_size = 1; file_size < 1024; ++file_size)
     {
@@ -4455,7 +4671,7 @@ UNIT_LOOP:
         }
         else
         {
-            std::cout << "Failed to open file for writing: " << file_path << std::endl;
+            PRINT_ERROR("Failed to open file for writing: %s", file_path.c_str());
 
             return false; // E X I T
         }
@@ -4465,9 +4681,18 @@ UNIT_LOOP:
         std::filesystem::remove( file_path ); // Delete test file
     }
 
-    printf("GEM FILE UNIT TESTS COMPLETE !!!\n\n");
+    PRINT_SUCCESS("GEM FILE UNIT TESTS COMPLETE !!!");
 
     DISABLE  -->    */
+
+    //
+    //    OCEAN PARAMETERS
+    //
+
+    const uint64_t start_byte = 1;
+    const uint64_t ocean_size = 1024 * 10; // 10 KB
+    GhostVector<uint8_t> ocean_vec( ocean_size );
+    uint8_t* ocean = ocean_vec.data();
 
     //
     //    SINGLE PASSWORD SINGLE FILE
@@ -4481,7 +4706,7 @@ UNIT_LOOP:
         {
             if ( EXIT_SIGNAL ) return true; // E X I T  S I G N A L
 
-            printf("SINGLE PASSWORD SINGLE FILE :: %d BYTES :: GEM PROTOCOL %d \n", gem_bytes, gem_protocol_key);
+            PRINT("SINGLE PASSWORD SINGLE FILE :: %d BYTES :: GEM PROTOCOL %d \n", gem_bytes, gem_protocol_key);
 
             std::vector<GemFile> gem_files;
             gem_files.push_back( GemFile( gem_bytes ) );
@@ -4495,31 +4720,30 @@ UNIT_LOOP:
             //    HIDE GEMS
             //
 
-            auto err = hide_gems(
-                gem_protocol_key,
+            auto gem_ocean = hide_gems(
+                0, // Auto Gem Protocol
                 ocean,
                 ocean_size,
-                EOceanType::BYTES,
                 gem_files,
-                password,
+                rand_password(),
                 true // b_validate
             );
 
-            if (err == EGemErrorCode::NOT_ENOUGH_SPACE)
+            if (gem_ocean.get_error() == EGemErrorCode::NOT_ENOUGH_SPACE)
             {
                 break;
             }
-            else if (err == EGemErrorCode::EXIT_SIGNAL)
+            else if (gem_ocean.get_error() == EGemErrorCode::EXIT_SIGNAL)
             {
                 return true; // E X I T  S I G N A L
             }
-            else if (err != EGemErrorCode::NONE)
+            else if (gem_ocean.get_error() != EGemErrorCode::NONE)
             {
                 b_error = true;
                 break;
             }
 
-            printf("\033[92m *** ALL READ GEM FILES MATCH DISK FILES: GEM PROTOCOL %d *** \033[0m \n\n",
+            PRINT_SUCCESS("*** ALL READ GEM FILES MATCH DISK FILES: GEM PROTOCOL %d ***",
                 gem_protocol_key); // <3 !!!
         }
 
@@ -4531,7 +4755,7 @@ UNIT_LOOP:
 
     if (b_error)
     {
-        printf("\033[91m *** SOME UNIT TESTS FAILED *** \033[0m \n\n");
+        PRINT_ERROR("*** SOME UNIT TESTS FAILED ***");
 
         return false; // E X I T
     }
@@ -4556,7 +4780,7 @@ UNIT_LOOP:
                 return true; // E X I T
             }
 
-            printf("SINGLE PASSWORD + MULTIPLE FILES :: %d BYTES :: GEM PROTOCOL %d \n", gem_bytes, gem_protocol_key);
+            PRINT("SINGLE PASSWORD + MULTIPLE FILES :: %d BYTES :: GEM PROTOCOL %d \n", gem_bytes, gem_protocol_key);
 
             std::vector<GemFile> gem_files;
             const std::string password = rand_password();
@@ -4573,21 +4797,20 @@ UNIT_LOOP:
                 //    HIDE GEMS
                 //
 
-                auto err = hide_gems(
-                    gem_protocol_key,
+                auto gem_ocean = hide_gems(
+                    0, // Auto Gem Protocol
                     ocean,
                     ocean_size,
-                    EOceanType::BYTES,
                     gem_files,
-                    password,
+                    rand_password(),
                     true // b_validate
                 );
 
-                if (err == EGemErrorCode::NOT_ENOUGH_SPACE)
+                if (gem_ocean.get_error() == EGemErrorCode::NOT_ENOUGH_SPACE)
                 {
                     break;
                 }
-                else if (err != EGemErrorCode::NONE)
+                else if (gem_ocean.get_error() != EGemErrorCode::NONE)
                 {
                     b_error = true;
                     break;
@@ -4600,7 +4823,7 @@ UNIT_LOOP:
             }
             else
             {
-                printf("\n\033[92m *** ALL READ GEM FILES MATCH DISK FILES: GEM PROTOCOL %d *** \033[0m \n\n",
+                PRINT_SUCCESS("*** ALL READ GEM FILES MATCH DISK FILES: GEM PROTOCOL %d ***",
                     gem_protocol_key); // <3 !!!
             }
         }
@@ -4613,7 +4836,7 @@ UNIT_LOOP:
 
     if (b_error)
     {
-        printf("\033[91m *** SOME UNIT TESTS FAILED *** \033[0m \n\n");
+        PRINT_ERROR("*** SOME UNIT TESTS FAILED ***");
 
         return false; // E X I T
     }
@@ -4621,12 +4844,12 @@ UNIT_LOOP:
 
     if (b_error)
     {
-        printf("\033[91m *** SOME UNIT TESTS FAILED *** \033[0m \n\n");
+        PRINT_ERROR("*** SOME UNIT TESTS FAILED ***");
 
         return false;
     }
 
-    printf("\n\033[92m *** ALL UNIT TESTS RAN SUCCESSFULLY *** \033[0m \n\n"); // <3 !!!
+    PRINT_SUCCESS("*** ALL UNIT TESTS RAN SUCCESSFULLY ***"); // <3 !!!
 
     ///
     //    LOOP
@@ -4642,90 +4865,151 @@ UNIT_LOOP:
 ///
 //    TERMINAL
 
-void print_splash_screen()
+void WRITE_STD_OUT(const char* str, va_list args)
 {
-    hide_term_cursor();
-
-    //  _    _ _____ _____  ______          _____ ______ __  __ 
-    // | |  | |_   _|  __ \|  ____|   /\   / ____|  ____|  \/  |
-    // | |__| | | | | |  | | |__     /  \ | |  __| |__  | \  / |
-    // |  __  | | | | |  | |  __|   / /\ \| | |_ |  __| | |\/| |
-    // | |  | |_| |_| |__| | |____ / ____ \ |__| | |____| |  | |
-    // |_|  |_|_____|_____/|______/_/    \_\_____|______|_|  |_|
-    //
-    //                      WWW.CYBERGEM.NET
-    //                      ____ ______ ____
-    //                     /    /      \    \
-    //                    /___ /________\ ___\
-    //                    \    \        /    /
-    //                      \   \      /   /
-    //                        \  \    /  /
-    //                          \ \  / /
-    //                             \/
-    //
-    //
-
-    printf("\033[35m  _    _ _____ _____  ______          \033[92m_____ \033[94m______\033[91m __  __ \033[0m\n");
-    printf("\033[35m | |  | |_   _|  __ \\|  ____|\033[37m   /\\   \033[92m/ ____|\033[94m  ____\033[91m|  \\/  |\033[0m\n");
-    printf("\033[35m | |__| | | | | |  | | |__  \033[37m   /  \\ \033[92m| |  __\033[94m| |__  \033[91m| \\  / |\033[0m\n");
-    printf("\033[35m |  __  | | | | |  | |  __| \033[37m  / /\\ \\\033[92m| | |_ |\033[94m  __| \033[91m| |\\/| |\033[0m\n");
-    printf("\033[35m | |  | |_| |_| |__| | |____\033[37m / ____ \\ \033[92m|__| |\033[94m |____\033[91m| |  | |\033[0m\n");
-    printf("\033[35m |_|  |_|_____|_____/|______\033[37m/_/    \\_\\\033[92m_____|\033[94m______\033[91m|_|  |_|\033[0m\n");
-
-    std::string version = "  v." + std::to_string( HIDEAGEM_VERSION ) + " " + HIDEAGEM_VERSION_NAME;
-
-    const int space_add = 22 - (int)version.size();
-
-    for (int i = 0; i < space_add; ++i)
-    {
-        version += " ";
-    }
-
-    std::cout << version << "\033[92m____ ______ ____\033[0m   WWW.CYBER\033[92mG\033[94mE\033[31mM\033[0m.NET";
-
-    printf("\033[92m"); // Bright Green
-printf(R"(
-                     /    /      \    \
-                    /___ /________\ ___\
-)");
-    printf("\033[94m"); // Bright Blue
-printf(R"(                    \    \        /    /
-                      \   \      /   /
-)");
-    printf("\033[91m"); // Bright Red
-printf(R"(                        \  \    /  /
-                          \ \  / /
-                             \/
-
-)");
-
-    printf("\033[0m"); // Reset color
+    vprintf(str, args);
 }
 
 
-void hide_term_cursor()
+void PRINT(const char* str, va_list args)
+{
+    printf( "%s", TERM_COLORS[ "WHITE_BRIGHT" ] );
+    WRITE_STD_OUT( str, args );
+    RESET_TERM_CURSOR(); // RESET CURSOR
+    printf("\n\n"); // DOUBLE NEWLINE
+}
+
+
+void PRINT(const char* str, ...)
+{
+    va_list args;
+    va_start(args, str);
+    PRINT( str, args );
+    va_end( args);
+}
+
+
+void PRINT_COLOR(const char* color, const char* str, va_list args)
+{
+    printf( "%s", TERM_COLORS[ color ] );
+    WRITE_STD_OUT( str, args );
+    RESET_TERM_CURSOR(); // RESET CURSOR
+    printf("\n\n"); // DOUBLE NEWLINE
+}
+
+
+void PRINT_COLOR(const char* color, const char* str, ...)
+{
+    va_list args;
+    va_start(args, str);
+    printf( "%s", TERM_COLORS[ color ] );
+    WRITE_STD_OUT( str, args );
+    RESET_TERM_CURSOR(); // RESET CURSOR
+    printf("\n\n"); // DOUBLE NEWLINE
+    va_end( args);
+}
+
+
+void PRINT_SUCCESS(const char* str, ...)
+{
+    va_list args;
+    va_start(args, str);
+    PRINT_COLOR( "GREEN_BRIGHT", str, args );
+    va_end( args);
+}
+
+
+void PRINT_WARNING(const char* str, ...)
+{
+    va_list args;
+    va_start(args, str);
+    PRINT_COLOR( "YELLOW_BRIGHT", str, args );
+    va_end( args);
+}
+
+
+void PRINT_ERROR(const char* str, ...)
+{
+    va_list args;
+    va_start(args, str);
+    PRINT_COLOR( "RED_BRIGHT", str, args );
+    va_end( args);
+}
+
+
+void PRINT_NO_NEWLINE(const char* str, ...)
+{
+    va_list args;
+    va_start(args, str);
+    printf( "%s", TERM_COLORS[ "WHITE_BRIGHT" ] );
+    WRITE_STD_OUT( str, args );
+    RESET_TERM_CURSOR(); // RESET CURSOR
+    va_end( args);
+}
+
+
+void PRINT_SAME_LINE(const char* str, ...)
+{
+    va_list args;
+    va_start(args, str);
+    printf( "%s", TERM_COLORS[ "WHITE_BRIGHT" ] );
+    WRITE_STD_OUT( str, args );
+    va_end( args);
+    RESET_TERM_CURSOR(); // RESET CURSOR
+
+    // MOVE CURSOR TO BEGINNING OF LINE
+    //
+    // Injects newline to force terminal redraw
+    // then moves cursor back up one line.
+    printf("\033[K\r\n\x1B[1A");
+}
+
+
+void PRINT_SAME_LINE_COLOR(const char* color, const char* str, ...)
+{
+    va_list args;
+    va_start(args, str);
+    printf( "%s", TERM_COLORS[ color ] );
+    WRITE_STD_OUT( str, args );
+    va_end( args);
+    RESET_TERM_CURSOR(); // RESET CURSOR
+
+    // MOVE CURSOR TO BEGINNING OF LINE
+    //
+    // Injects newline to force terminal redraw
+    // then moves cursor back up one line.
+    printf("\033[K\r\n\x1B[1A");
+}
+
+
+void HIDE_TERM_CURSOR()
 {
     printf("\033[?25l");
 }
 
 
-void show_term_cursor()
+void SHOW_TERM_CURSOR()
 {
     printf("\033[?25h");
 }
 
+
+void RESET_TERM_CURSOR()
+{
+    printf("\033[0m");
+}
+
+
 bool STDIN_YES_OR_NO()
 {
-    std::cout << "\n"; // Double newline
-
     auto PRINT_PROMPT = []()
     {
-        printf("\n\033[0m\033[92myes\033[0m / \033[91mno\033[0m => ");
+        printf("\033[97m\033[92myes\033[97m / \033[91mno\033[97m => ");
     };
     
     PRINT_PROMPT(); // Yes / No
 
-    show_term_cursor(); // Show cursor
+    SHOW_TERM_CURSOR(); // Show cursor
 
     bool b_yes = false;
 
@@ -4746,11 +5030,76 @@ bool STDIN_YES_OR_NO()
     }
     while ( true );
 
-    hide_term_cursor(); // Hide cursor
+    HIDE_TERM_CURSOR(); // Hide cursor
 
     std::cout << "\n"; // Double newline
 
     return b_yes;
+}
+
+
+void PRINT_SPLASH_SCREEN()
+{
+    HIDE_TERM_CURSOR();
+    RESET_TERM_CURSOR();
+
+    //  _    _ _____ _____  ______          _____ ______ __  __ 
+    // | |  | |_   _|  __ \|  ____|   /\   / ____|  ____|  \/  |
+    // | |__| | | | | |  | | |__     /  \ | |  __| |__  | \  / |
+    // |  __  | | | | |  | |  __|   / /\ \| | |_ |  __| | |\/| |
+    // | |  | |_| |_| |__| | |____ / ____ \ |__| | |____| |  | |
+    // |_|  |_|_____|_____/|______/_/    \_\_____|______|_|  |_|
+    //
+    //                      WWW.CYBERGEM.NET
+    //                      ____ ______ ____
+    //                     /    /      \    \
+    //                    /___ /________\ ___\
+    //                    \    \        /    /
+    //                      \   \      /   /
+    //                        \  \    /  /
+    //                          \ \  / /
+    //                             \/
+    //
+    //
+
+    printf("\033[35m  _    _ _____ _____  ______          \033[92m_____ \033[94m______\033[91m __  __ \033[97m\n");
+    printf("\033[35m | |  | |_   _|  __ \\|  ____|\033[97m   /\\   \033[92m/ ____|\033[94m  ____\033[91m|  \\/  |\033[97m\n");
+    printf("\033[35m | |__| | | | | |  | | |__  \033[97m   /  \\ \033[92m| |  __\033[94m| |__  \033[91m| \\  / |\033[97m\n");
+    printf("\033[35m |  __  | | | | |  | |  __| \033[97m  / /\\ \\\033[92m| | |_ |\033[94m  __| \033[91m| |\\/| |\033[97m\n");
+    printf("\033[35m | |  | |_| |_| |__| | |____\033[97m / ____ \\ \033[92m|__| |\033[94m |____\033[91m| |  | |\033[97m\n");
+    printf("\033[35m |_|  |_|_____|_____/|______\033[97m/_/    \\_\\\033[92m_____|\033[94m______\033[91m|_|  |_|\033[97m\n");
+
+    std::string version = "  v" + std::to_string( HIDEAGEM_VERSION_MAJOR ) +
+        "." + std::to_string( HIDEAGEM_VERSION_MAJOR ) + " " + HIDEAGEM_VERSION_NAME;
+
+    const int space_add = 21 - (int)version.size();
+
+    for (int i = 0; i < space_add; ++i)
+    {
+        version += " ";
+    }
+
+    std::cout << "                      \033[92m____ ______ ____";
+
+    std::cout << "\n\033[97m" << version << "\033[92m/    /      \\    \\\033[97m  WWW.CYBER\033[92mG\033[94mE\033[31mM\033[97m.NET";
+
+    printf("\033[92m"); // Bright Green
+printf(R"(
+                    /___ /________\ ___\
+)");
+    printf("\033[94m"); // Bright Blue
+printf(R"(                    \    \        /    /
+                      \   \      /   /
+)");
+    printf("\033[91m"); // Bright Red
+printf(R"(                        \  \    /  /
+                          \ \  / /
+                             \/
+
+)");
+
+    SHOW_TERM_CURSOR();
+    RESET_TERM_CURSOR(); // Reset term cursor colors
 }
 
 }; // namespace HideAGemCore
@@ -4759,18 +5108,45 @@ bool STDIN_YES_OR_NO()
 //    HIDEAGEM C WRAPPER FOR PYTHON
 //
 
-bool HIDEAGEM_HIDE_GEMS_C(
+// Returns a pointer to Gem Ocean data.
+// WARNING !!! Caller is responsible for freeing Gem Ocean memory !
+uint8_t* HIDEAGEM_HIDE_GEMS_C(
     int gem_protocol,
     void* ocean,
     uint64_t ocean_size,
-    int ocean_type,
     const char** file_paths,
     int file_paths_length,
     const char* password,
     int time_trap,
+    uint64_t* out_ocean_size,
     bool b_validate
 )
 {
+    if ( ocean == nullptr )
+    {
+        std::cerr << "Ocean is nullptr.\n\n";
+
+        return nullptr;
+    }
+    else if ( out_ocean_size == nullptr )
+    {
+        std::cerr << "Out Ocean size is nullptr.\n\n";
+
+        return nullptr;
+    }
+    else if ( file_paths == nullptr )
+    {
+        std::cerr << "Gem File paths are nullptr.\n\n";
+
+        return nullptr;
+    }
+    else if ( out_ocean_size == nullptr )
+    {
+        std::cerr << "Out Ocean size is nullptr.\n\n";
+
+        return nullptr;
+    }
+
     std::vector<std::string> file_paths_vec;
 
     for (int i = 0; i < file_paths_length; ++i)
@@ -4779,26 +5155,204 @@ bool HIDEAGEM_HIDE_GEMS_C(
     }
 
     std::string password_str(password);
+    HideAGemCore::EGemErrorCode error_code;
 
-    return HideAGemCore::hide_gems(
-
+    HideAGemCore::GemOcean out_ocean = HideAGemCore::hide_gems(
         gem_protocol,
         ocean,
         ocean_size,
-        (HideAGemCore::EOceanType)ocean_type,
         { file_paths_vec },
         { password_str },
         { time_trap },
         b_validate
+    );
 
-    ) == HideAGemCore::EGemErrorCode::NONE;
+    // TODO return error_code
+
+    if ( ! out_ocean.is_valid() )
+    {
+        *out_ocean_size = 0;
+
+        return nullptr;
+    }
+
+    // Finalize Gem Ocean data (e.g. write pixel data to PNG image file)
+    out_ocean.finalize();
+    *out_ocean_size = out_ocean.size(); // Must call after finalize()
+
+    // WARNING !!! Caller is now responsible for freeing Ocean memory !
+    return out_ocean.take();
+}
+
+
+// Returns a pointer to Gem Ocean data.
+// WARNING !!! Caller is responsible for freeing Gem Ocean memory !
+uint8_t* HIDEAGEM_HIDE_GEMS_32_BIT_C(
+    int gem_protocol,
+    void* ocean,
+    uint32_t ocean_size,
+    const char** file_paths,
+    int file_paths_length,
+    const char* password,
+    int time_trap,
+    uint32_t* out_ocean_size,
+    bool b_validate
+)
+{
+    uint64_t _out_ocean_size = 0;
+
+    uint8_t* out_ocean = HIDEAGEM_HIDE_GEMS_C(
+        gem_protocol,
+        ocean,
+        ocean_size,
+        file_paths,
+        file_paths_length,
+        password,
+        time_trap,
+        &_out_ocean_size,
+        b_validate
+    );
+
+    *out_ocean_size = _out_ocean_size;
+
+    return out_ocean;
+}
+
+
+// Returns a pointer to Gem Ocean data.
+// WARNING !!! Caller is responsible for freeing Gem Ocean memory !
+uint8_t* HIDEAGEM_HIDE_GEM_FILES_C(
+    int gem_protocol,
+    void* ocean,
+    uint64_t ocean_size,
+    const uint8_t** gem_files,
+    const uint64_t* gem_file_sizes,
+    const char** gem_file_names,
+    const uint64_t num_gem_files,
+    const char* password,
+    int time_trap,
+    uint64_t* out_ocean_size,
+    bool b_validate
+)
+{
+    if ( ocean == nullptr )
+    {
+        std::cerr << "Ocean is nullptr.\n\n";
+
+        return nullptr;
+    }
+    else if ( out_ocean_size == nullptr )
+    {
+        std::cerr << "Out Ocean size is nullptr.\n\n";
+
+        return nullptr;
+    }
+    else if ( gem_files == nullptr )
+    {
+        std::cerr << "Gem Files are nullptr.\n\n";
+
+        return nullptr;
+    }
+    else if ( gem_file_sizes == nullptr )
+    {
+        std::cerr << "Gem File sizes are nullptr.\n\n";
+
+        return nullptr;
+    }
+    else if ( out_ocean_size == nullptr )
+    {
+        std::cerr << "Out Ocean size is nullptr.\n\n";
+
+        return nullptr;
+    }
+
+    std::string password_str(password);
+    HideAGemCore::EGemErrorCode error_code;
+
+    std::vector<HideAGemCore::GemFile> _gem_files;
+
+    for (int i = 0; i < num_gem_files; ++i)
+    {
+        _gem_files.push_back(
+            HideAGemCore::GemFile( gem_files[i], gem_file_sizes[i], gem_file_names[i], false /* b_pack */ )
+        );
+    }
+
+    HideAGemCore::GemOcean out_ocean = HideAGemCore::hide_gems(
+        gem_protocol,
+        ocean,
+        ocean_size,
+        _gem_files,
+        password_str,
+        time_trap,
+        b_validate
+    );
+
+    // TODO return error_code
+
+    if ( ! out_ocean.is_valid() )
+    {
+        *out_ocean_size = 0;
+
+        return nullptr;
+    }
+
+    // Finalize Gem Ocean data (e.g. write pixel data to PNG image file)
+    out_ocean.finalize();
+    *out_ocean_size = out_ocean.size(); // Must call after finalize()
+
+    // WARNING !!! Caller is now responsible for freeing Ocean memory !
+    return out_ocean.take();
+}
+
+
+// Returns a pointer to Gem Ocean data.
+// WARNING !!! Caller is responsible for freeing Gem Ocean memory !
+uint8_t* HIDEAGEM_HIDE_GEM_FILES_32_BIT_C(
+    int gem_protocol,
+    void* ocean,
+    uint32_t ocean_size,
+    const uint8_t** gem_files,
+    const uint32_t* gem_file_sizes,
+    const char** gem_file_names,
+    const uint32_t num_gem_files,
+    const char* password,
+    int time_trap,
+    uint32_t* out_ocean_size,
+    bool b_validate
+)
+{
+    uint64_t _out_ocean_size = 0;
+
+    std::vector<uint64_t> sizes_64;
+    for (int i = 0; i < num_gem_files; ++i)
+    {
+        sizes_64.push_back( static_cast<uint64_t>( gem_file_sizes[i] ) );
+    }
+
+    uint8_t* out_ocean = HIDEAGEM_HIDE_GEM_FILES_C(
+        gem_protocol,
+        ocean,
+        ocean_size,
+        gem_files,
+        sizes_64.data(),
+        gem_file_names,
+        num_gem_files,
+        password,
+        time_trap,
+        &_out_ocean_size,
+        b_validate
+    );
+
+    *out_ocean_size = _out_ocean_size;
+
+    return out_ocean;
 }
 
 
 void HIDEAGEM_FIND_GEMS_C(
     void* ocean,
     uint64_t ocean_size,
-    int ocean_type,
     const char* password,
     const char* output_dir,
     bool b_time_trap
@@ -4815,14 +5369,38 @@ void HIDEAGEM_FIND_GEMS_C(
         optional_output_dir = &output_dir_str;
     }
 
-    HideAGemCore::find_gems(
+    FOUND_GEM_FILES_C =
+        HideAGemCore::find_gems(
+            ocean,
+            ocean_size,
+            { password_str },
+            optional_output_dir,
+            { b_time_trap }
+        );
+}
+
+
+void HIDEAGEM_FIND_GEMS_32_BIT_C(
+    void* ocean,
+    uint32_t ocean_size,
+    const char* password,
+    const char* output_dir,
+    bool b_time_trap
+)
+{
+    HIDEAGEM_FIND_GEMS_C(
         ocean,
         ocean_size,
-        (HideAGemCore::EOceanType)ocean_type,
-        { password_str },
-        optional_output_dir,
-        { b_time_trap }
+        password,
+        output_dir,
+        b_time_trap
     );
+}
+
+
+void HIDEAGEM_ACTIVATE_DEMO_MODE_C()
+{
+    HideAGemCore::RUN_UNIT_TESTS(true, true);
 }
 
 
@@ -4835,5 +5413,14 @@ bool HIDEAGEM_RUN_UNIT_TESTS_C(
         b_loop,
         b_demo_mode
     );
+}
+
+
+HIDEAGEM_DLL_EXPORT void HIDEAGEM_FREE_OCEAN_C(void* ocean)
+{
+    if ( ocean != nullptr )
+    {
+        free( ocean );
+    }
 }
 

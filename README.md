@@ -14,7 +14,7 @@
 █  /___ /________\ ___\                                    █   .-.   .-.      '.___.'     █
 █  \    \        /    /  ASTRAL SOFTWARE FROM THE FUTURE   █  (_  \ /  _)     .'   `.     █
 █    \   \      /   /                                      █       |         :       :    █
-█      \  \    /  /      COPYRIGHT 2023 WWW.CYBERGEM.NET   █       |         :       :    █
+█      \  \    /  /      COPYRIGHT 2024 WWW.CYBERGEM.NET   █       |         :       :    █
 █        \ \  / /                                          █       |          `.___.'     █
 █           \/           LET'S DO COMPUTER STUFF ALL DAY   █                              █
 █                                                          █                              █

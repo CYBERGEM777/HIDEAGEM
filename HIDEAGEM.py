@@ -8,7 +8,7 @@
 #  888    888   888   888  .d88P 888         d8888888888 Y88b  d88P 888        888   "   888
 #  888    888 8888888 8888888P"  8888888888 d88P     888  "Y8888P88 8888888888 888       888
 #
-#  COPYRIGHT (c) 2023 WWW.CYBERGEM.NET
+#  COPYRIGHT (c) 2024 WWW.CYBERGEM.NET
 
 import os
 import math
@@ -44,23 +44,23 @@ else:
 
 # Hide Gems
 HIDEAGEM_CORE.HIDEAGEM_HIDE_GEMS_C.argtypes = [
-    ctypes.c_int, 
-    ctypes.POINTER(ctypes.c_void_p), 
-    ctypes.c_uint64, # Ocean Size
-    ctypes.c_int,    # Ocean Type
-    ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), 
-    ctypes.c_int, 
-    ctypes.c_char_p, 
-    ctypes.c_int, 
+    ctypes.c_int,
+    ctypes.c_void_p,
+    ctypes.c_uint64,
+    ctypes.POINTER(ctypes.POINTER(ctypes.c_char)),
+    ctypes.c_int,
+    ctypes.c_char_p,
+    ctypes.c_int,
+    ctypes.POINTER(ctypes.c_uint64),
     ctypes.c_bool
 ]
-HIDEAGEM_CORE.HIDEAGEM_HIDE_GEMS_C.restype = ctypes.c_bool
+
+HIDEAGEM_CORE.HIDEAGEM_HIDE_GEMS_C.restype = ctypes.POINTER(ctypes.c_uint8)
 
 # Find Gems
 HIDEAGEM_CORE.HIDEAGEM_FIND_GEMS_C.argtypes = [
     ctypes.POINTER(ctypes.c_void_p), 
     ctypes.c_uint64, # Ocean Size
-    ctypes.c_int,    # Ocean Type
     ctypes.c_char_p, 
     ctypes.c_char_p,
     ctypes.c_bool
@@ -72,6 +72,10 @@ HIDEAGEM_CORE.HIDEAGEM_RUN_UNIT_TESTS_C.argtypes = [
     ctypes.c_bool, 
     ctypes.c_bool
 ]
+
+# Memory management
+HIDEAGEM_CORE.HIDEAGEM_FREE_OCEAN_C.argtypes = [ctypes.c_void_p]
+HIDEAGEM_CORE.HIDEAGEM_FREE_OCEAN_C.restype = None
 
 #
 #    HIDEAGEM <3 !!!
@@ -93,34 +97,19 @@ def run_find_gems(args):
     if not args.ocean:
         print("\nGem Ocean is missing.\n")
         return
-    elif not args.password:
-        print("\nGem password is missing.\n")
-        return
         
     if args.timetrap is not None:
         b_time_trap = True
     else:
         b_time_trap = False
 
-    ocean_bytes = None
-    ocean_mode = 0 # Bytes mode
+    with open(args.ocean, 'rb') as file:
+        ocean_bytes = file.read()
 
-    # Check if the file is an image
-    if is_image_file(args.ocean):
-        # Open the image
-        with Image.open(args.ocean) as img:
-            # Convert the image to raw bytes without converting to float32
-            ocean_bytes = img.tobytes()
+    password_c = b''
 
-            if img.mode == "RGB":
-                ocean_mode = 1 # IMAGE_RGB mode
-            elif img.mode == "RGBA":
-                ocean_mode = 2 # IMAGE_RGBA mode
-
-    else:
-        # Load the ocean as a byte array directly
-        with open(args.ocean, 'rb') as file:
-            ocean_bytes = file.read()
+    if args.password is not None:
+        password_c = args.password.encode()
 
     ocean_size = len(ocean_bytes)
     mutable_array = (ctypes.c_char * len(ocean_bytes)).from_buffer(bytearray(ocean_bytes))
@@ -131,11 +120,14 @@ def run_find_gems(args):
     HIDEAGEM_CORE.HIDEAGEM_FIND_GEMS_C(
         ocean_ptr,
         ocean_size,
-        ocean_mode,
-        args.password.encode(), # Password
+        password_c,
         output_dir,
         b_time_trap
     )
+
+#
+#    DEMO MODE <3
+#
 
 def run_demo_mode(args):
 
@@ -151,30 +143,9 @@ def run_demo_mode(args):
 
 def run_hide_gems(args):
 
-    ocean_mode = 0 # Bytes mode
-
-    # Check if the file is an image
-    if is_image_file(args.ocean):
-        # Open the image
-        with Image.open(args.ocean) as img:
-            # Convert the image to raw bytes without converting to float32
-            ocean_bytes = img.tobytes()
-            img_width, img_height = img.size  # width and height are now cached
-            img_mode = img.mode  # this caches the color mode which indicates the number of channels
-
-            if img_mode == "RGB":
-                ocean_mode = 1 # IMAGE_RGB mode
-            elif img_mode == "RGBA":
-                ocean_mode = 2 # IMAGE_RGBA mode
-            else:
-                print(f"Unsupported image mode {img_mode}. Exiting.")
-
-                return
-
-    else:
-        # Load the ocean as a byte array directly
-        with open(args.ocean, 'rb') as file:
-            ocean_bytes = file.read()
+    # Load the ocean as a byte array directly
+    with open(args.ocean, 'rb') as file:
+        ocean_bytes = file.read()
 
     ocean_size = len(ocean_bytes)
     mutable_array = (ctypes.c_char * len(ocean_bytes)).from_buffer(bytearray(ocean_bytes))
@@ -184,6 +155,11 @@ def run_hide_gems(args):
     files = [f.encode('utf-8') for f in args.files]
     arr = (ctypes.c_char_p * len(files))(*files)
 
+    password_c = b''
+
+    if args.password is not None:
+        password_c = args.password.encode()
+
     if args.timetrap is not None:
         time_trap = args.timetrap
         gem_protocol = 2 # Auto protocol
@@ -191,19 +167,25 @@ def run_hide_gems(args):
         time_trap    = -1 # Time Trap disabled
         gem_protocol = 0 # Auto protocol
 
-    b_hid_gems = HIDEAGEM_CORE.HIDEAGEM_HIDE_GEMS_C(
+    # Prepare a c_uint64 variable to capture the output size
+    out_ocean_size = ctypes.c_uint64()
+
+    # Hide Gem Files in Ocean.
+    # Returned GEM_OCEAN memory must be freed below!
+    GEM_OCEAN = HIDEAGEM_CORE.HIDEAGEM_HIDE_GEMS_C(
         gem_protocol,
         ocean_ptr,
         ocean_size,
-        ocean_mode,
-        ctypes.cast(arr, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))),
+        ctypes.cast(arr, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))),  # Assuming arr is an array of string pointers
         len(args.files),
-        args.password.encode(),
+        password_c,
         time_trap,
+        ctypes.byref(out_ocean_size),  # Pass the reference to out_ocean_size
         args.validate
     )
 
-    if not b_hid_gems:
+    if not GEM_OCEAN:
+        print("Gem Ocean is nullptr!")
         return
 
     if args.output is None: # Not saving Gem to disk
@@ -215,42 +197,28 @@ def run_hide_gems(args):
         os.makedirs(args.output)
 
     # Write Gem to disk
-    if is_image_file(args.ocean):
+    base_name, _ = os.path.splitext(os.path.basename(args.ocean))  # Ignore the original extension
+    output_file_path = os.path.join(args.output, f"{base_name}.png")
+    counter = 1
 
-        if img_mode == "RGB":
-            img_channels = 3
-        elif img_mode == "RGBA":
-            img_channels = 4
-        else:
-            print(f"Unsupported image mode {img_mode}. Exiting.")
+    while os.path.exists(output_file_path):
+        output_file_path = os.path.join(args.output, f"{base_name}_{counter}.png")
+        counter += 1
 
-            return
+    with open(output_file_path, 'wb') as output_file:
+        output_file.write(bytearray((ctypes.c_uint8 * out_ocean_size.value).from_address(ctypes.addressof(GEM_OCEAN.contents))))
 
-        base_name, _ = os.path.splitext(os.path.basename(args.ocean))  # Ignore the original extension
-        output_file_path = os.path.join(args.output, f"{base_name}.png")
-        counter = 1
+    #
+    #    !!! FREE GEM OCEAN MEMORY !!!
+    #
 
-        while os.path.exists(output_file_path):
-            output_file_path = os.path.join(args.output, f"{base_name}_{counter}.png")
-            counter += 1
+    HIDEAGEM_CORE.HIDEAGEM_FREE_OCEAN_C( GEM_OCEAN );
 
-        image_array = np.frombuffer(bytearray(mutable_array), dtype=np.uint8).reshape((img_height, img_width, img_channels))
-        image = Image.fromarray(image_array)
+    print(f"SAVED GEM: {output_file_path}\n")
 
-        # Save the image with PNG format
-        image.save(output_file_path, format='PNG')
-
-        print(f"SAVED GEM: {output_file_path}\n")
-
-    else:
-        ocean_filename = os.path.basename(args.ocean)
-        output_file_path = os.path.join(args.output, ocean_filename)
-        
-        with open(output_file_path, 'wb') as output_file:
-            output_file.write(bytearray(mutable_array))
-
-        print(f"SAVED GEM: {output_file_path}\n")
-
+#
+#    RUN UNIT TESTS
+#
 
 def run_unit_tests(args):
 

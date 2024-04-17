@@ -8,48 +8,65 @@
 #  888    888   888   888  .d88P 888         d8888888888 Y88b  d88P 888        888   "   888
 #  888    888 8888888 8888888P"  8888888888 d88P     888  "Y8888P88 8888888888 888       888
 #
-#  COPYRIGHT (c) 2023 WWW.CYBERGEM.NET
+#  COPYRIGHT (c) 2024 WWW.CYBERGEM.NET
 
 import os
 import math
 import torch
 import ctypes
 import secrets
+import platform
 import numpy as np
+
+#
+#    HIDEAGEM C LIBRARY
+#
+
+HIDEAGEM_CORE = None
+current_dir = os.path.dirname(os.path.realpath(__file__))
+
+lib_path = "HIDEAGEM"
+
+if platform.system() == "Windows":
+    lib_path += ".dll"
+else:
+    lib_path += ".so"
+
+lib_path = os.path.join(current_dir, lib_path)
+
+if platform.system() == "Windows":
+    HIDEAGEM_CORE = ctypes.WinDLL(lib_path)
+else:
+    HIDEAGEM_CORE = ctypes.CDLL(lib_path)
 
 #
 #    HIDEAGEM C INTERFACE
 #
 
-current_dir = os.path.dirname(os.path.realpath(__file__))
-dll_name = "HIDEAGEM.dll"
-dll_path = os.path.join(current_dir, dll_name)
-
-HIDEAGEM_CORE = ctypes.WinDLL(dll_path)
-
-# Hide Gems
 HIDEAGEM_CORE.HIDEAGEM_HIDE_GEMS_C.argtypes = [
-    ctypes.c_int, 
-    ctypes.POINTER(ctypes.c_void_p), 
-    ctypes.c_uint64, # Ocean Size
-    ctypes.c_int,    # Ocean Type
-    ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), 
-    ctypes.c_int, 
-    ctypes.c_char_p, 
-    ctypes.c_int, 
-    ctypes.c_bool
+    ctypes.c_int,                       # gem_protocol
+    ctypes.c_void_p,                    # ocean
+    ctypes.c_uint64,                    # ocean_size
+    ctypes.POINTER(ctypes.c_char_p),    # file_paths
+    ctypes.c_int,                       # file_paths_length
+    ctypes.c_char_p,                    # password
+    ctypes.c_int,                       # time_trap
+    ctypes.POINTER(ctypes.c_uint64),    # out_ocean_size
+    ctypes.c_bool                       # b_validate
 ]
-HIDEAGEM_CORE.HIDEAGEM_HIDE_GEMS_C.restype = ctypes.c_bool
+
+HIDEAGEM_CORE.HIDEAGEM_HIDE_GEMS_C.restype = ctypes.POINTER(ctypes.c_uint8)
+
 
 # Find Gems
 HIDEAGEM_CORE.HIDEAGEM_FIND_GEMS_C.argtypes = [
     ctypes.POINTER(ctypes.c_void_p), 
     ctypes.c_uint64, # Ocean Size
-    ctypes.c_int,    # Ocean Type
     ctypes.c_char_p, 
     ctypes.c_char_p,
     ctypes.c_bool
 ]
+
 HIDEAGEM_CORE.HIDEAGEM_FIND_GEMS_C.restype = None
 
 # Debug
@@ -57,100 +74,12 @@ HIDEAGEM_CORE.HIDEAGEM_RUN_UNIT_TESTS_C.argtypes = [
     ctypes.c_bool, 
     ctypes.c_bool
 ]
+
 HIDEAGEM_CORE.HIDEAGEM_RUN_UNIT_TESTS_C.restype = ctypes.c_bool
 
-#
-#    GEM KIT
-#
-
-class HideAGemKit:
-
-    def __init__(self, gem_protocol, base_image, passwords, output_dir=None):
-        self.gem_protocol = gem_protocol
-        self.passwords = passwords
-        self.output_dir = output_dir
-        self.base_image = base_image
-        # NOTE: clone() always creates a contiguous tensor
-        self.gem_img = None
-        self.gem_img_bytes = (base_image.clone().cpu().numpy() * 255).astype(np.uint8)
-        self.trailmap_img = base_image.clone().cpu().numpy()
-        self.debug_img = torch.zeros(base_image.shape, dtype=torch.float32, device="cpu").numpy()
-        self.mask_img = torch.zeros((base_image.size(1), base_image.size(2)), dtype=torch.float32, device="cpu").numpy()
-        self.b_validate = False
-        self.b_loop = False
-        self.b_demo_mode = False
-
-
-    def set_validate(self, comfyui_bool):
-        if not isinstance(comfyui_bool, str):
-            raise Exception("HideAGemKit set_validate() expects a string argument with value 'enable' or 'disable'")
-        elif comfyui_bool == "enable":
-            self.b_validate = True
-        elif comfyui_bool == "disable":
-            self.b_validate = False
-        else:
-            raise Exception("HideAGemKit set_validate() expects a string argument with value 'enable' or 'disable'")
-
-    def set_loop(self, comfyui_bool):
-        if not isinstance(comfyui_bool, str):
-            raise Exception("HideAGemKit set_loop() expects a string argument with value 'enable' or 'disable'")
-        elif comfyui_bool == "enable":
-            self.b_loop = True
-        elif comfyui_bool == "disable":
-            self.b_loop = False
-        else:
-            raise Exception("HideAGemKit set_loop() expects a string argument with value 'enable' or 'disable'")
-
-    def set_demo_mode(self, comfyui_bool):
-        if not isinstance(comfyui_bool, str):
-            raise Exception("HideAGemKit set_demo_mode() expects a string argument with value 'enable' or 'disable'")
-        elif comfyui_bool == "enable":
-            self.b_demo_mode = True
-        elif comfyui_bool == "disable":
-            self.b_demo_mode = False
-        else:
-            raise Exception("HideAGemKit set_demo_mode() expects a string argument with value 'enable' or 'disable'")
-
-    def get_ocean_type(self):
-        return 1 # OceanType::IMAGE_RGB
-
-    def get_num_ocean_bytes(self):
-        return self.base_image.shape[1] * self.base_image.shape[2] * self.base_image.shape[3]
-
-    def get_image_height(self):
-        return self.base_image.shape[1]
-
-    def get_image_width(self):
-        return self.base_image.shape[2]
-
-    def get_image_size(self):
-        return self.base_image.size
-
-    def get_gem_image(self):
-        self.gem_img = torch.from_numpy(self.gem_img_bytes).to(dtype=torch.float32)
-        # Normalize the tensor to the range 0 to 1
-        self.gem_img = self.gem_img / 255.0
-        return self.gem_img
-
-    def get_gem_image_c(self):
-        return self.gem_img_bytes.ctypes.data_as(ctypes.POINTER(ctypes.c_void_p))
-
-    def get_trailmap_image(self):
-        return torch.tensor(self.trailmap_img)
-
-    def get_debug_image(self):
-        return torch.tensor(self.debug_img)
-
-    def get_mask_image(self):
-        return torch.tensor(self.mask_img)
-
-
-    def gen_grid_image(self):
-        grid_image = self.base_image
-        grid_image = torch.cat((grid_image, self.get_gem_image()), dim=2) # Horizontal concat
-        grid_image = torch.cat((grid_image, torch.cat((self.get_trailmap_image(), self.get_debug_image()), dim=2)), dim=1) # Vertical concat
-
-        return grid_image
+# Memory management
+HIDEAGEM_CORE.HIDEAGEM_FREE_OCEAN_C.argtypes = [ctypes.c_void_p]
+HIDEAGEM_CORE.HIDEAGEM_FREE_OCEAN_C.restype = None
 
 #
 #    UTILITIES
@@ -181,7 +110,7 @@ class HideAGem_FindGems:
                     "default": ""
                 }),
 
-                "time_trap": (["enable", "disable"],),
+                "time_trap": (["disable", "enable"],),
 
                 "output_directory": ("STRING", {
                     "multiline": False, #True if you want the field to look like the one on the ClipTextEncode node
@@ -210,22 +139,24 @@ class HideAGem_FindGems:
         else:
             output_dir_c = output_directory.encode('utf-8')
 
-        gem_kit = HideAGemKit(0, gem_image, [password], output_directory)
+        # Clone base image and convert to pointer
+        in_ocean = (gem_image.clone().cpu().numpy() * 255).astype(np.uint8)
+        in_ocean_pointer = in_ocean.ctypes.data_as(ctypes.POINTER(ctypes.c_void_p))
+
+        num_ocean_bytes = gem_image.shape[1] * gem_image.shape[2] * gem_image.shape[3]
         
         password_c = password.encode('utf-8')
 
         b_time_trap = time_trap == "enable"
 
         HIDEAGEM_CORE.HIDEAGEM_FIND_GEMS_C(
-            gem_kit.get_gem_image_c(),
-            gem_kit.get_num_ocean_bytes(),
-            gem_kit.get_ocean_type(),
+            in_ocean_pointer,
+            num_ocean_bytes,
             password_c,
             output_dir_c,
             b_time_trap
         )
 
-        del gem_kit.passwords
         del password
 
         return (gem_image,)
@@ -259,7 +190,7 @@ class HideAGem_AutoHide:
 
                 "gem_files": ("STRING", {
                     "multiline": True, #True if you want the field to look like the one on the ClipTextEncode node
-                    "default": "Paste file paths here, one per line."
+                    "default": "Paste file paths here, one per line and/or comma separated."
                 }),
             },
         }
@@ -277,45 +208,61 @@ class HideAGem_AutoHide:
 
     def entry_point(self, gem_image, password, time_trap_level, validate, gem_files):
 
-        # Gem Protocol 0 is auto mode
-        gem_kit = HideAGemKit(0, gem_image, [password])
-        gem_kit.set_validate(validate)
+        password_c = password.encode('utf-8')
 
         file_paths = process_file_paths(gem_files)
 
-        password_c = password.encode('utf-8')
+        file_paths_array = (ctypes.c_char_p * len(file_paths))(*[bytes(fp, 'utf-8') for fp in file_paths])
 
-        file_paths_c_char_arrays = [ctypes.create_string_buffer(path.encode('utf-8')) for path in file_paths]
-
-        file_paths_pointers = (ctypes.POINTER(ctypes.c_char) * len(file_paths))(*[ctypes.cast(path, ctypes.POINTER(ctypes.c_char)) for path in file_paths_c_char_arrays])
-
-        file_paths_array = ctypes.cast(file_paths_pointers, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)))
+        out_ocean_size = ctypes.c_uint64()
         
         if time_trap_level > -1:
             gem_protocol_key = 2
         else:
             gem_protocol_key = 0
-        
+
+        # Clone base image and convert to pointer
+        in_ocean = (gem_image.clone().cpu().numpy() * 255).astype(np.uint8)
+        in_ocean_pointer = in_ocean.ctypes.data_as(ctypes.POINTER(ctypes.c_void_p))
+
+        num_ocean_bytes = gem_image.shape[1] * gem_image.shape[2] * gem_image.shape[3]
+
         # HIDE GEM !!!
-        b_hid_gem = HIDEAGEM_CORE.HIDEAGEM_HIDE_GEMS_C(
-            gem_protocol_key,
-            gem_kit.get_gem_image_c(),
-            gem_kit.get_num_ocean_bytes(),
-            gem_kit.get_ocean_type(),
+        out_ocean_pointer = HIDEAGEM_CORE.HIDEAGEM_HIDE_GEMS_C(
+            ctypes.c_int(gem_protocol_key),
+            in_ocean_pointer,
+            ctypes.c_uint64(num_ocean_bytes),
             file_paths_array,
-            len(file_paths),
+            ctypes.c_int(len(file_paths)),
             password_c,
-            time_trap_level,
-            validate
+            ctypes.c_int(time_trap_level),
+            ctypes.byref(out_ocean_size),
+            ctypes.c_bool(validate)
         )
 
-        del gem_kit.passwords
         del password
 
-        if not b_hid_gem:
+        if not out_ocean_pointer or out_ocean_size.value == 0:
             raise Exception("Gem hide failed !!!")
 
-        return (gem_kit.get_gem_image(),)
+        # To numpy array
+        out_ocean_array_flat = np.ctypeslib.as_array(out_ocean_pointer, shape=(out_ocean_size.value,))
+        
+        # Reshape array
+        expected_shape = gem_image.shape
+        out_ocean_array = out_ocean_array_flat.reshape(expected_shape)
+
+        # To tensor
+        out_ocean = torch.from_numpy(out_ocean_array).to(dtype=torch.float32)
+        out_ocean = out_ocean / 255.0
+        
+        #
+        #    !!! FREE GEM OCEAN MEMORY !!!
+        #
+
+        HIDEAGEM_CORE.HIDEAGEM_FREE_OCEAN_C( out_ocean_pointer );
+
+        return (out_ocean,)
 
 #
 #    HIDEAGEM AUTO HIDE + RANDOM PASSWORD
@@ -373,7 +320,7 @@ class HideAGem_AutoHide_RandomPassword:
 
                 "gem_files": ("STRING", {
                     "multiline": True, #True if you want the field to look like the one on the ClipTextEncode node
-                    "default": "Paste file paths here, one per line."
+                    "default": "Paste file paths here, one per line and/or comma separated."
                 }),
             },
         }
@@ -392,49 +339,64 @@ class HideAGem_AutoHide_RandomPassword:
     def entry_point(self, gem_image, password_entropy, time_trap_level, validate, gem_files):
 
         password = gen_random_password(password_entropy)
-
-        # Gem Protocol 0 is auto mode
-        gem_kit = HideAGemKit(0, gem_image, [password])
-        gem_kit.set_validate(validate)
+        password_c = password.encode('utf-8')
 
         file_paths = process_file_paths(gem_files)
 
-        password_c = password.encode('utf-8')
+        file_paths_array = (ctypes.c_char_p * len(file_paths))(*[bytes(fp, 'utf-8') for fp in file_paths])
 
-        file_paths_c_char_arrays = [ctypes.create_string_buffer(path.encode('utf-8')) for path in file_paths]
-
-        file_paths_pointers = (ctypes.POINTER(ctypes.c_char) * len(file_paths))(*[ctypes.cast(path, ctypes.POINTER(ctypes.c_char)) for path in file_paths_c_char_arrays])
-
-        file_paths_array = ctypes.cast(file_paths_pointers, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)))
+        out_ocean_size = ctypes.c_uint64()
         
         if time_trap_level > -1:
             gem_protocol_key = 2
         else:
             gem_protocol_key = 0
 
+        # Clone base image and convert to pointer
+        in_ocean = (gem_image.clone().cpu().numpy() * 255).astype(np.uint8)
+        in_ocean_pointer = in_ocean.ctypes.data_as(ctypes.POINTER(ctypes.c_void_p))
+
+        num_ocean_bytes = gem_image.shape[1] * gem_image.shape[2] * gem_image.shape[3]
+
         # HIDE GEM !!!
-        b_hid_gem = HIDEAGEM_CORE.HIDEAGEM_HIDE_GEMS_C(
-            gem_protocol_key,
-            gem_kit.get_gem_image_c(),
-            gem_kit.get_num_ocean_bytes(),
-            gem_kit.get_ocean_type(),
+        out_ocean_pointer = HIDEAGEM_CORE.HIDEAGEM_HIDE_GEMS_C(
+            ctypes.c_int(gem_protocol_key),
+            in_ocean_pointer,
+            ctypes.c_uint64(num_ocean_bytes),
             file_paths_array,
-            len(file_paths),
+            ctypes.c_int(len(file_paths)),
             password_c,
-            time_trap_level,
-            validate
+            ctypes.c_int(time_trap_level),
+            ctypes.byref(out_ocean_size),
+            ctypes.c_bool(validate)
         )
 
-        if not b_hid_gem:
+        if not out_ocean_pointer or out_ocean_size.value == 0:
             raise Exception("Gem hide failed !!!")
 
         print(f"Generated random Base62 password with {password_entropy} bits of entropy (estimated):\033[94m\n")
         print(password, "\033[0m\n")
 
-        del gem_kit.passwords
         del password
 
-        return (gem_kit.get_gem_image(),)
+        # To numpy array
+        out_ocean_array_flat = np.ctypeslib.as_array(out_ocean_pointer, shape=(out_ocean_size.value,))
+        
+        # Reshape array
+        expected_shape = gem_image.shape
+        out_ocean_array = out_ocean_array_flat.reshape(expected_shape)
+
+        # To tensor
+        out_ocean = torch.from_numpy(out_ocean_array).to(dtype=torch.float32)
+        out_ocean = out_ocean / 255.0
+        
+        #
+        #    !!! FREE GEM OCEAN MEMORY !!!
+        #
+
+        HIDEAGEM_CORE.HIDEAGEM_FREE_OCEAN_C( out_ocean_pointer );
+
+        return (out_ocean,)
 
 #
 #    HIDEAGEM UNIT TESTS
@@ -468,14 +430,20 @@ class HideAGem_UnitTests:
 
     def entry_point(self, ANY_IMAGE, LOOP, DEMO_MODE):
 
-        gem_kit = HideAGemKit(0, ANY_IMAGE, ["CYBERGEM"])
-        gem_kit.set_loop(LOOP)
-        gem_kit.set_demo_mode(DEMO_MODE)
+        if LOOP == "enable":
+            b_loop = True
+        elif LOOP == "disable":
+            b_loop = False
+
+        if DEMO_MODE == "enable":
+            b_demo_mode = True
+        elif DEMO_MODE == "disable":
+            b_demo_mode = False
 
         # Run unit tests !!!
         HIDEAGEM_CORE.HIDEAGEM_RUN_UNIT_TESTS_C(
-            gem_kit.b_loop,
-            gem_kit.b_demo_mode
+            b_loop,
+            b_demo_mode
         )
 
         return (ANY_IMAGE,)
