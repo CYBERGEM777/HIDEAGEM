@@ -230,8 +230,6 @@ The nodes come with some example workspaces showing how to use them.
 
 When fiding Gems, the console window will require user input to save Gems to disk, so after you start a Gem find switch over to ComfyUI's console to see what the result was.
 
-**NOTE:** The hide and find nodes don't handle images with an alpha channel (such as transparent PNGs) properly. For now, use HIDEAGEM via the CLI if you need to hide/find Gems in images that have alpha channels.
-
 
 ## Building
 
