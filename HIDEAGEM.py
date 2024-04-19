@@ -17,7 +17,6 @@ import argparse
 
 import numpy as np
 
-from PIL import Image
 from ctypes import POINTER
 
 #
@@ -26,7 +25,7 @@ from ctypes import POINTER
 
 HIDEAGEM_CORE = None
 
-# Try to load HIDEAGEM.dll from current directory, then try bin/
+# Try to load HIDEAGEM library from current directory, then try bin/
 
 dll_name = "HIDEAGEM.dll" if os.name == 'nt' else "HIDEAGEM.so"
 this_dir = os.path.dirname(os.path.realpath(__file__))
@@ -35,12 +34,11 @@ dll_path = os.path.join(this_dir, dll_name)
 if not os.path.exists(dll_path):
     dll_path = os.path.join(this_dir, "bin", dll_name)
 
-# Load the library
+# Load HIDEAGEM library
 if os.name == 'posix':
     HIDEAGEM_CORE = ctypes.CDLL(dll_path)
 else:
     HIDEAGEM_CORE = ctypes.WinDLL(dll_path, winmode=0)
-
 
 # Hide Gems
 HIDEAGEM_CORE.HIDEAGEM_HIDE_GEMS_C.argtypes = [
@@ -65,28 +63,18 @@ HIDEAGEM_CORE.HIDEAGEM_FIND_GEMS_C.argtypes = [
     ctypes.c_char_p,
     ctypes.c_bool
 ]
+
 HIDEAGEM_CORE.HIDEAGEM_FIND_GEMS_C.restype = None
+
+# Memory management
+HIDEAGEM_CORE.HIDEAGEM_FREE_OCEAN_C.argtypes = [ctypes.c_void_p]
+HIDEAGEM_CORE.HIDEAGEM_FREE_OCEAN_C.restype = None
 
 # Debug
 HIDEAGEM_CORE.HIDEAGEM_RUN_UNIT_TESTS_C.argtypes = [
     ctypes.c_bool, 
     ctypes.c_bool
 ]
-
-# Memory management
-HIDEAGEM_CORE.HIDEAGEM_FREE_OCEAN_C.argtypes = [ctypes.c_void_p]
-HIDEAGEM_CORE.HIDEAGEM_FREE_OCEAN_C.restype = None
-
-#
-#    HIDEAGEM <3 !!!
-#
-
-def is_image_file(file_path):
-    try:
-        Image.open(file_path)
-        return True
-    except IOError:
-        return False
 
 #
 #    FIND GEMS
