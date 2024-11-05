@@ -69,6 +69,8 @@ For an in depth explanation of HIDEAGEM's algorithms and design, [please see thi
 
 Development updates and support are available [on Discord.](https://discord.com/invite/XdSMcKQa5F)
 
+HIDEAGEM can now be used in the browser at [WWW.HIDEAGEM.COM](https://hideagem.com) !
+
 
 ## Objectives
 
