@@ -55,59 +55,138 @@
 
 #pragma /* <3 */ once // upon a time ...
 
-#include <string>
-#include <vector>
 #include <cstdint>
 
-#include "GEM_FILE.h"
-#include "GEM_OCEAN.h"
-#include "HIDEAGEM_ENUMS.h"
+#include "EXCEPTION.h"
+#include "TERMINAL_UTILS.h"
+#include "GHOST_VECTOR.h"
 
 //
-//    HIDEAGEM CORE
+//    BIT STREAM
 //
+//    Reads bits from bytes in input_bytes array in order of LSB to MSB
+//
+//    Will not modify Ghost Vector.
 
 namespace HIDEAGEM_CORE {
 
-///
-//    HIDEAGEM CORE API
+class BitStream
+{
+public:
 
-// Returns Gem Ocean (ocean with Gem Files embedded in it)
-// with valid data upon success and nullptr upon failure.
-//
-// NOTE: Creates a copy of ocean of size ocean_size bytes.
-GemOcean hide_gems(
-    int gem_protocol,
-    const void* ocean,
-    uint64_t ocean_size,
-    std::vector<GemFile>& gem_files,
-    const std::string& password,
-    int time_trap = static_cast<int>(ETimeTrapLevel::NONE),
-    bool b_validate = false
-);
+    BitStream() {}
+    BitStream(const GhostVector<uint8_t>& input_bytes) : bytes(&input_bytes) {}
 
-GemOcean hide_gems(
-    int gem_protocol,
-    const void* ocean,
-    uint64_t ocean_size,
-    const std::vector<std::vector<std::string>>& file_paths,
-    const std::vector<std::string>& passwords,
-    const std::vector<int> time_traps,
-    bool b_validate = false
-);
+    bool get_bits(uint8_t& out_bit, const uint8_t num_bits, uint64_t start_bit) const
+    {
+        return get_bits_from(num_bits, out_bit, start_bit);
+    }
 
-std::vector<GemFile> find_gems(
-    const void* ocean,
-    uint64_t _ocean_size,
-    const std::vector<std::string>& passwords,
-    const std::string* output_dir = nullptr,
-    const std::vector<bool> time_traps = std::vector<bool>()
-);
+    // Returns the byte in bytes that contains bit at bit_index
+    uint8_t get_byte_at_bit_index(const uint64_t bit_index) const
+    {  
+        if (bytes == nullptr)
+        {
+            _EXCEPTION("Attempted to get byte at index from BitStream with nullptr bytes array.");
+            
+            return 0;
+        }
 
-///
-//    DEBUG ZONE
+        const size_t index = bit_index / 8;
+        if (index < bytes->size())
+        {
+            return (*bytes)[ index ];
+        }
 
-bool RUN_UNIT_TESTS(bool b_loop = false, bool b_demo_mode = false);
+        return 0;
+    }
+
+    uint64_t get_num_bytes() const
+    {
+        if (bytes == nullptr)
+        {
+            _EXCEPTION("Attempted to get num bytes from BitStream with nullptr bytes array.");
+            
+            return 0;
+        }
+
+        return bytes->size();
+    }
+
+    uint64_t get_num_bits() const
+    {
+        return get_num_bytes() * 8;
+    }
+
+    const GhostVector<uint8_t>& get_bytes() const
+    {
+        if ( bytes != nullptr )
+        {
+            return *bytes;
+        }
+
+        static GhostVector<uint8_t> NULL_BYTES;
+
+        return NULL_BYTES; // Empty vector on error
+    }
+
+    bool is_valid_index(const uint64_t start_bit) const
+    {
+        return start_bit < get_num_bits();
+    }
+
+    void vanish()
+    {
+        bytes = nullptr;
+    }
+
+private:
+
+    // Pointer to bytes vector to stream bits from
+    const GhostVector<uint8_t>* bytes = nullptr;
+
+    BitStream(const uint8_t& byte) = delete;
+
+    bool get_bits_from(uint8_t num_bits, uint8_t& out_value, uint64_t start_bit) const
+    {
+        if (bytes == nullptr)
+        {
+            _EXCEPTION("Attempted to get bits from BitStream with nullptr bytes array.");
+            
+            return false;
+        }
+
+        size_t start_byte = start_bit / 8;
+        uint8_t bit_index = start_bit % 8;
+
+        // Validate last read index
+        if (!is_valid_index(start_bit + num_bits - 1))
+        {
+            return false;
+        }
+
+        out_value = 0;
+
+        for (uint8_t i = 0; i < num_bits; ++i)
+        {
+            // Read from LSB to MSB
+            uint8_t bit = ((*bytes)[start_byte] >> bit_index) & 0x01;
+
+            // Shift the out_value to the left by 1 and add the new bit to the LSB
+            out_value |= (bit << i);
+
+            bit_index++;
+
+            if (bit_index == 8)
+            {
+                bit_index = 0;
+                start_byte++;
+            }
+        }
+
+        return true;
+    }
+};
 
 }; // namespace HIDEAGEM_CORE
 

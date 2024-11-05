@@ -55,59 +55,126 @@
 
 #pragma /* <3 */ once // upon a time ...
 
-#include <string>
-#include <vector>
 #include <cstdint>
 
-#include "GEM_FILE.h"
-#include "GEM_OCEAN.h"
-#include "HIDEAGEM_ENUMS.h"
+#include "GHOST_VECTOR.h"
 
 //
-//    HIDEAGEM CORE
+//    BIT COLLECTOR
 //
+//    Reads bits from bytes in input_bytes array in order of LSB to MSB
 
 namespace HIDEAGEM_CORE {
 
-///
-//    HIDEAGEM CORE API
+class BitCollector
+{
+public:
 
-// Returns Gem Ocean (ocean with Gem Files embedded in it)
-// with valid data upon success and nullptr upon failure.
-//
-// NOTE: Creates a copy of ocean of size ocean_size bytes.
-GemOcean hide_gems(
-    int gem_protocol,
-    const void* ocean,
-    uint64_t ocean_size,
-    std::vector<GemFile>& gem_files,
-    const std::string& password,
-    int time_trap = static_cast<int>(ETimeTrapLevel::NONE),
-    bool b_validate = false
-);
+    BitCollector() {}
 
-GemOcean hide_gems(
-    int gem_protocol,
-    const void* ocean,
-    uint64_t ocean_size,
-    const std::vector<std::vector<std::string>>& file_paths,
-    const std::vector<std::string>& passwords,
-    const std::vector<int> time_traps,
-    bool b_validate = false
-);
+    // Returns true if a new byte was pushed to the vector
+    bool add_bits(uint8_t in_bits, uint8_t num_bits)
+    {
+        bool b_pushed = false;
 
-std::vector<GemFile> find_gems(
-    const void* ocean,
-    uint64_t _ocean_size,
-    const std::vector<std::string>& passwords,
-    const std::string* output_dir = nullptr,
-    const std::vector<bool> time_traps = std::vector<bool>()
-);
+        for (uint8_t i = 0; i < num_bits; ++i)
+        {
+            // Extract the relevant bit from in_bits (from LSB to MSB)
+            uint8_t bit = (in_bits >> i) & 0x01;
 
-///
-//    DEBUG ZONE
+            b_last_bit_was_zero = bit == 0;
 
-bool RUN_UNIT_TESTS(bool b_loop = false, bool b_demo_mode = false);
+            // Shift the current_byte to the left by 1 and add the new bit to the LSB
+            current_byte |= (bit << write_bit_index);
+
+            ++write_bit_index;
+
+            // If we've filled up a byte, push it to the vector
+            if (write_bit_index == 8)
+            {
+                b_pushed = true;
+                new_bytes.push_back(current_byte);
+                current_byte = 0;
+                write_bit_index = 0;
+            }
+        }
+
+        return b_pushed;
+    }
+
+    uint8_t get_current_byte() const
+    {
+        return current_byte;
+    }
+
+    GhostVector<uint8_t>& get_bytes()
+    {
+        return collected_bytes;
+    }
+
+    const GhostVector<uint8_t>& get_bytes() const
+    {
+        return collected_bytes;
+    }
+
+    uint64_t get_num_bytes() const
+    {
+        return collected_bytes.size();
+    }
+
+    uint64_t get_num_bits() const
+    {
+        return collected_bytes.size() * 8;
+    }
+
+    uint64_t get_num_new_bytes() const
+    {
+        return new_bytes.size();
+    }
+
+    // Adds first new byte to collected bytes
+    // Returns true if byte collected
+    bool collect_new_byte()
+    {
+        if (new_bytes.empty())
+        {
+            return false;
+        }
+
+        collected_bytes.push_back(new_bytes.front());
+        new_bytes.erase(new_bytes.begin());
+
+        return true;
+    }
+
+    uint8_t back() const
+    {
+        return collected_bytes.back();
+    }
+
+    void clear_collected_bytes()
+    {
+        collected_bytes.clear();
+    }
+
+    bool last_bit_was_zero() const
+    {
+        return b_last_bit_was_zero;
+    }
+
+    bool last_bit_was_one() const
+    {
+        return ! b_last_bit_was_zero;
+    }
+
+private:
+
+    GhostVector<uint8_t> collected_bytes;
+    GhostVector<uint8_t> new_bytes;
+    uint8_t current_byte = 0;
+    uint8_t write_bit_index = 0;
+    bool b_last_bit_was_zero = true;
+};
 
 }; // namespace HIDEAGEM_CORE
 

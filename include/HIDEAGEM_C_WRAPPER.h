@@ -55,59 +55,171 @@
 
 #pragma /* <3 */ once // upon a time ...
 
-#include <string>
 #include <vector>
-#include <cstdint>
 
+#include "TERMINAL_UTILS.h"
 #include "GEM_FILE.h"
-#include "GEM_OCEAN.h"
-#include "HIDEAGEM_ENUMS.h"
 
 //
-//    HIDEAGEM CORE
+//    HIDEAGEM C WRAPPER
 //
 
-namespace HIDEAGEM_CORE {
+#if defined(_WIN32) || defined(_WIN64) // Windows (32-bit and 64-bit)
+#define HIDEAGEM_DLL_EXPORT __declspec(dllexport)
+#else // Linux and OS X
+#define HIDEAGEM_DLL_EXPORT __attribute__((visibility("default")))
+#endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include <stdint.h>
+#include <stdbool.h>
 
 ///
-//    HIDEAGEM CORE API
+//    HIDE GEMS
 
-// Returns Gem Ocean (ocean with Gem Files embedded in it)
-// with valid data upon success and nullptr upon failure.
-//
-// NOTE: Creates a copy of ocean of size ocean_size bytes.
-GemOcean hide_gems(
+// Returns a pointer to Gem Ocean data.
+// WARNING !!! Caller is responsible for freeing Gem Ocean memory !
+HIDEAGEM_DLL_EXPORT uint8_t* HIDEAGEM_HIDE_GEMS_C(
     int gem_protocol,
-    const void* ocean,
+    void* ocean,
     uint64_t ocean_size,
-    std::vector<GemFile>& gem_files,
-    const std::string& password,
-    int time_trap = static_cast<int>(ETimeTrapLevel::NONE),
-    bool b_validate = false
+    const char** file_paths,
+    int file_paths_length,
+    const char* password,
+    int time_trap,
+    uint64_t* out_ocean_size,
+    bool b_validate
 );
 
-GemOcean hide_gems(
+// Returns a pointer to Gem Ocean data.
+// WARNING !!! Caller is responsible for freeing Gem Ocean memory !
+HIDEAGEM_DLL_EXPORT uint8_t* HIDEAGEM_HIDE_GEMS_32_BIT_C(
     int gem_protocol,
-    const void* ocean,
-    uint64_t ocean_size,
-    const std::vector<std::vector<std::string>>& file_paths,
-    const std::vector<std::string>& passwords,
-    const std::vector<int> time_traps,
-    bool b_validate = false
+    void* ocean,
+    uint32_t ocean_size,
+    const char** file_paths,
+    int file_paths_length,
+    const char* password,
+    int time_trap,
+    uint32_t* out_ocean_size,
+    bool b_validate
 );
 
-std::vector<GemFile> find_gems(
-    const void* ocean,
-    uint64_t _ocean_size,
-    const std::vector<std::string>& passwords,
-    const std::string* output_dir = nullptr,
-    const std::vector<bool> time_traps = std::vector<bool>()
+// Returns a pointer to Gem Ocean data.
+// WARNING !!! Caller is responsible for freeing Gem Ocean memory !
+HIDEAGEM_DLL_EXPORT uint8_t* HIDEAGEM_HIDE_GEM_FILES_C(
+    int gem_protocol,
+    void* ocean,
+    uint64_t ocean_size,
+    const uint8_t** gem_files,
+    const uint64_t* gem_file_sizes,
+    const char** gem_file_names,
+    const uint64_t num_gem_files,
+    const char* password,
+    int time_trap,
+    uint64_t* out_ocean_size,
+    bool b_validate
+);
+
+// Returns a pointer to Gem Ocean data.
+// WARNING !!! Caller is responsible for freeing Gem Ocean memory !
+HIDEAGEM_DLL_EXPORT uint8_t* HIDEAGEM_HIDE_GEM_FILES_32_BIT_C(
+    int gem_protocol,
+    void* ocean,
+    uint32_t ocean_size,
+    const uint8_t** gem_files,
+    const uint32_t* gem_file_sizes,
+    const char** gem_file_names,
+    const uint32_t num_gem_files,
+    const char* password,
+    int time_trap,
+    uint32_t* out_ocean_size,
+    bool b_validate
 );
 
 ///
-//    DEBUG ZONE
+//    FIND GEMS
 
-bool RUN_UNIT_TESTS(bool b_loop = false, bool b_demo_mode = false);
+// Found Gem Files (local to each thread)
+thread_local std::vector<HIDEAGEM_CORE::GemFile> FOUND_GEM_FILES_C;
 
-}; // namespace HIDEAGEM_CORE
+HIDEAGEM_DLL_EXPORT void HIDEAGEM_FIND_GEMS_C(
+    void* ocean,
+    uint64_t ocean_size,
+    const char* password,
+    const char* output_dir,
+    bool b_time_trap
+);
+
+HIDEAGEM_DLL_EXPORT void HIDEAGEM_FIND_GEMS_32_BIT_C(
+    void* ocean,
+    uint32_t ocean_size,
+    const char* password,
+    const char* output_dir,
+    bool b_time_trap
+);
+
+HIDEAGEM_DLL_EXPORT uint8_t* HIDEAGEM_GET_GEM_FILE_DATA_C(size_t index)
+{
+    if (index < FOUND_GEM_FILES_C.size())
+    {
+        return FOUND_GEM_FILES_C[index].data();
+    }
+
+    return nullptr;
+}
+
+HIDEAGEM_DLL_EXPORT uint32_t HIDEAGEM_GET_GEM_FILE_SIZE_C(size_t index)
+{
+    if (index < FOUND_GEM_FILES_C.size())
+    {
+        return FOUND_GEM_FILES_C[index].size();
+    }
+
+    return 0;
+}
+
+HIDEAGEM_DLL_EXPORT const char* HIDEAGEM_GET_GEM_FILE_NAME_C(size_t index)
+{
+    if (index < FOUND_GEM_FILES_C.size())
+    {
+        return (const char*)FOUND_GEM_FILES_C[index].name().c_str();
+    }
+
+    return nullptr;
+}
+
+HIDEAGEM_DLL_EXPORT uint32_t HIDEAGEM_GET_NUM_GEM_FILES_C()
+{
+    return FOUND_GEM_FILES_C.size();
+}
+
+HIDEAGEM_DLL_EXPORT void HIDEAGEM_EMPTY_GEM_FILES_C()
+{
+    FOUND_GEM_FILES_C.clear();
+}
+
+HIDEAGEM_DLL_EXPORT void HIDEAGEM_PRINT_SPLASH_SCREEN_C()
+{
+    HIDEAGEM_CORE::PRINT_SPLASH_SCREEN();
+}
+
+///
+//    UTILITIES
+
+HIDEAGEM_DLL_EXPORT void HIDEAGEM_ACTIVATE_DEMO_MODE_C();
+
+HIDEAGEM_DLL_EXPORT bool HIDEAGEM_RUN_UNIT_TESTS_C(
+    bool b_loop,
+    bool b_demo_mode
+);
+
+HIDEAGEM_DLL_EXPORT void HIDEAGEM_FREE_OCEAN_C(void* ocean);
+
+#ifdef __cplusplus
+}
+#endif
 

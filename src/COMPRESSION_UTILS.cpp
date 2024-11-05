@@ -53,61 +53,127 @@
 // ▀                                                          ▀                              ▀
 // ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
 
-#pragma /* <3 */ once // upon a time ...
+#include "COMPRESSION_UTILS.h"
+#include "EXCEPTION.h"
 
-#include <string>
-#include <vector>
-#include <cstdint>
+#include <limits>
 
-#include "GEM_FILE.h"
-#include "GEM_OCEAN.h"
-#include "HIDEAGEM_ENUMS.h"
+#include "miniz.h"
 
 //
-//    HIDEAGEM CORE
+//    COMPRESSION UTILS
 //
 
 namespace HIDEAGEM_CORE {
 
 ///
-//    HIDEAGEM CORE API
+//    MINIZ 
 
-// Returns Gem Ocean (ocean with Gem Files embedded in it)
-// with valid data upon success and nullptr upon failure.
-//
-// NOTE: Creates a copy of ocean of size ocean_size bytes.
-GemOcean hide_gems(
-    int gem_protocol,
-    const void* ocean,
-    uint64_t ocean_size,
-    std::vector<GemFile>& gem_files,
-    const std::string& password,
-    int time_trap = static_cast<int>(ETimeTrapLevel::NONE),
-    bool b_validate = false
-);
+bool miniz_compress
+(
+    uint8_t*  input, 
+    uint64_t  input_size, 
+    uint8_t*  output, 
+    uint64_t* output_size
+)
+{
+    if (output == nullptr)
+    {
+        throw _EXCEPTION("Tried to compress data into nullptr output.");
+    }
+    else if (input == nullptr)
+    {
+        throw _EXCEPTION("Tried to compress nullptr data.");
+    }
+    else if (output_size == nullptr)
+    {
+        throw _EXCEPTION("Tried to compress data with nullptr output_size.");
+    }
+    else if (*output_size > std::numeric_limits<uint32_t>::max())
+    {
+        // TODO handle streams > 4GB
+        throw _EXCEPTION("Hiding Gem Streams larger than 4 GB not yet supported!");
+    }
 
-GemOcean hide_gems(
-    int gem_protocol,
-    const void* ocean,
-    uint64_t ocean_size,
-    const std::vector<std::vector<std::string>>& file_paths,
-    const std::vector<std::string>& passwords,
-    const std::vector<int> time_traps,
-    bool b_validate = false
-);
+    mz_stream stream = {0};
+    stream.next_in   = input;
+    stream.avail_in  = (mz_uint32)input_size;
+    stream.next_out  = output;
+    stream.avail_out = (mz_uint32)(*output_size);
 
-std::vector<GemFile> find_gems(
-    const void* ocean,
-    uint64_t _ocean_size,
-    const std::vector<std::string>& passwords,
-    const std::string* output_dir = nullptr,
-    const std::vector<bool> time_traps = std::vector<bool>()
-);
+    if (mz_deflateInit(&stream, MZ_BEST_COMPRESSION) != MZ_OK)
+    {
+        throw _EXCEPTION("Data compression initialization failed.");
+    }
 
-///
-//    DEBUG ZONE
+    const int status = mz_deflate( &stream, MZ_FINISH );
 
-bool RUN_UNIT_TESTS(bool b_loop = false, bool b_demo_mode = false);
+    if ( status == MZ_STREAM_ERROR )
+    {
+        mz_deflateEnd( &stream );
+
+        throw _EXCEPTION("Data compression failed.");
+    }
+
+    mz_deflateEnd( &stream );
+
+    *output_size = stream.total_out;
+
+    return true; // Success
+}
+
+
+bool miniz_decompress
+(
+    uint8_t*  input, 
+    uint64_t  input_size, 
+    uint8_t*  output, 
+    uint64_t* output_size
+)
+{
+    if (output == nullptr)
+    {
+        throw _EXCEPTION("Tried to decompress data into nullptr output.");
+    }
+    else if (input == nullptr)
+    {
+        throw _EXCEPTION("Tried to decompress nullptr data.");
+    }
+    else if (output_size == nullptr)
+    {
+        throw _EXCEPTION("Tried to decompress data with nullptr output_size.");
+    }
+    else if (*output_size > std::numeric_limits<uint32_t>::max())
+    {
+        // TODO handle streams > 4GB
+        throw _EXCEPTION("Hiding Gem Streams larger than 4 GB not yet supported!");
+    }
+
+    mz_stream stream = {0};
+    stream.next_in   = input;
+    stream.avail_in  = (mz_uint32)input_size;
+    stream.next_out  = output;
+    stream.avail_out = (mz_uint32)(*output_size);
+
+    if (mz_inflateInit(&stream) != MZ_OK)
+    {
+        throw _EXCEPTION("Data decompression initialization failed.");
+    }
+
+    // TODO extract stream > 4GB
+
+    const int status = mz_inflate( &stream, MZ_FINISH );
+    mz_inflateEnd( &stream );
+
+    if (status != MZ_STREAM_END)
+    {
+        throw _EXCEPTION("Data decompression failed.");
+    }
+
+    *output_size = stream.total_out;
+
+    return true; // Success
+}
 
 }; // namespace HIDEAGEM_CORE
 

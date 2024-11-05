@@ -55,59 +55,92 @@
 
 #pragma /* <3 */ once // upon a time ...
 
-#include <string>
-#include <vector>
-#include <cstdint>
+#include <array>
+#include <limits>
 
-#include "GEM_FILE.h"
-#include "GEM_OCEAN.h"
-#include "HIDEAGEM_ENUMS.h"
+#define SODIUM_STATIC = 1
+#include <sodium.h>
 
 //
-//    HIDEAGEM CORE
+//    HIDEAGEM CONSTANTS
 //
 
 namespace HIDEAGEM_CORE {
 
-///
-//    HIDEAGEM CORE API
+constexpr uint16_t    HIDEAGEM_VERSION_MAJOR = 1;
+constexpr uint16_t    HIDEAGEM_VERSION_MINOR = 2;
+constexpr const char* HIDEAGEM_VERSION_NAME  = "LOVEMAGNET";
 
-// Returns Gem Ocean (ocean with Gem Files embedded in it)
-// with valid data upon success and nullptr upon failure.
+constexpr uint8_t REQUIRED_SODIUM_VERSION_MAJOR = 26;
+constexpr uint8_t REQUIRED_SODIUM_VERSION_MINOR = 1;
+
 //
-// NOTE: Creates a copy of ocean of size ocean_size bytes.
-GemOcean hide_gems(
-    int gem_protocol,
-    const void* ocean,
-    uint64_t ocean_size,
-    std::vector<GemFile>& gem_files,
-    const std::string& password,
-    int time_trap = static_cast<int>(ETimeTrapLevel::NONE),
-    bool b_validate = false
-);
-
-GemOcean hide_gems(
-    int gem_protocol,
-    const void* ocean,
-    uint64_t ocean_size,
-    const std::vector<std::vector<std::string>>& file_paths,
-    const std::vector<std::string>& passwords,
-    const std::vector<int> time_traps,
-    bool b_validate = false
-);
-
-std::vector<GemFile> find_gems(
-    const void* ocean,
-    uint64_t _ocean_size,
-    const std::vector<std::string>& passwords,
-    const std::string* output_dir = nullptr,
-    const std::vector<bool> time_traps = std::vector<bool>()
-);
+//    *** START PERMANENT CONSTANTS ***
+//
+//    CHANGING THESE BREAKS BACKWARDS COMPATIBILITY !!!
 
 ///
-//    DEBUG ZONE
+//    TYPES
 
-bool RUN_UNIT_TESTS(bool b_loop = false, bool b_demo_mode = false);
+using GemByte     = uint8_t;
+using GemSize     = uint64_t;
+using GemHeader   = uint32_t;
+using OceanIndex  = uint64_t;
+using GemBitIndex = uint64_t;
+
+template <std::size_t N>
+using RNGWarp = std::array<uint64_t, N>;
+
+///
+//    CONSTANTS
+
+constexpr uint8_t NUM_SALT_BYTES = 16; // 128 bits
+
+constexpr uint8_t GEM_HEADER_BIT_MODE = 1; // 1 bit
+constexpr uint8_t GEM_HEADER_SIZE     = 8; // 64 bits
+
+constexpr uint8_t GEM_PROTOCOL_BIT_SIZE = 16; // Bits
+
+constexpr uint8_t MINIZ_TAIL_SIZE = sizeof( uint64_t ); // 64-bit byte count
+
+constexpr uint8_t GEM_FILE_HEAD_SIZE = sizeof( GemSize );
+
+constexpr uint64_t DEFAULT_MASTER_KEY_AUTO_CYCLE_RATE = 64; // 512 bits per cycle
+
+constexpr uint8_t GEM_STREAM_HEAD_SIZE  = sizeof( GemSize );
+constexpr uint8_t GEM_STREAM_TAIL_SIZE  = crypto_aead_xchacha20poly1305_ietf_ABYTES;    // 128-bit AEAD tag
+constexpr uint8_t GEM_STREAM_NONCE_SIZE = crypto_aead_xchacha20poly1305_ietf_NPUBBYTES; // 192-bit nonce
+
+constexpr uint8_t READ_STOP_BYTE_VALUE = 0;
+constexpr uint8_t READ_STOP_BYTE_COUNT = 8; // Bytes (64 bits)
+
+constexpr size_t ERROR_INDEX = std::numeric_limits<size_t>::max();
+
+///
+//    GEM PROTOCOL PARAMETERS SIZES
+
+constexpr uint8_t GEMMA_RANDOM_PARAMS_SIZE = 1; // Byte
+
+///
+//    TIME TRAPS
+//
+//    Ocean bytes per Cycle Key regeneration (lower = slower)
+
+constexpr uint64_t RUBY_TIME_TRAP_MAX_CYCLE_RATE = 2048;
+
+//
+//    *** END PERMANENT CONSTANTS ***
+//
+
+///
+//    TRANSIENT CONSTANTS
+
+constexpr uint64_t TEMPORARY_MAX_GEM_SIZE = 1ull * (1ull << 32);   // 4 GB (temporary limit for current testing phase)
+constexpr uint64_t BOMB_PATROL_THRESHOLD  = 100ull * (1ull << 20); // 100 MB
+
+constexpr double STATUS_PRINT_COOLDOWN_TIME = 0.03333f; // 30 Hz (in seconds)
+
+constexpr uint8_t GEM_FILES_PRINT_ASK_THRESHOLD = 128; // Ask to print more than n Gem Files
 
 }; // namespace HIDEAGEM_CORE
 

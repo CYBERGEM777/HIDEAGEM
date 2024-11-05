@@ -55,59 +55,104 @@
 
 #pragma /* <3 */ once // upon a time ...
 
-#include <string>
-#include <vector>
-#include <cstdint>
-
-#include "GEM_FILE.h"
-#include "GEM_OCEAN.h"
+#include "EXCEPTION.h"
 #include "HIDEAGEM_ENUMS.h"
+#include "GHOST_VECTOR.h"
 
 //
-//    HIDEAGEM CORE
+//    OCEAN BYTE SET
 //
 
 namespace HIDEAGEM_CORE {
 
-///
-//    HIDEAGEM CORE API
+class OceanByteSet
+{
+public:
 
-// Returns Gem Ocean (ocean with Gem Files embedded in it)
-// with valid data upon success and nullptr upon failure.
-//
-// NOTE: Creates a copy of ocean of size ocean_size bytes.
-GemOcean hide_gems(
-    int gem_protocol,
-    const void* ocean,
-    uint64_t ocean_size,
-    std::vector<GemFile>& gem_files,
-    const std::string& password,
-    int time_trap = static_cast<int>(ETimeTrapLevel::NONE),
-    bool b_validate = false
-);
+    OceanByteSet() {}
 
-GemOcean hide_gems(
-    int gem_protocol,
-    const void* ocean,
-    uint64_t ocean_size,
-    const std::vector<std::vector<std::string>>& file_paths,
-    const std::vector<std::string>& passwords,
-    const std::vector<int> time_traps,
-    bool b_validate = false
-);
+    OceanByteSet(const uint64_t __size, const EOceanType __type)
+    : _size(__size)
+    , bits((__size + 7) / 8, 0)
+    , _ocean_type(__type)
+    {}
 
-std::vector<GemFile> find_gems(
-    const void* ocean,
-    uint64_t _ocean_size,
-    const std::vector<std::string>& passwords,
-    const std::string* output_dir = nullptr,
-    const std::vector<bool> time_traps = std::vector<bool>()
-);
+    ~OceanByteSet()
+    {
+        vanish(); // Secure erase
+    }
 
-///
-//    DEBUG ZONE
+    uint64_t num_set() const { return _num_set; }
 
-bool RUN_UNIT_TESTS(bool b_loop = false, bool b_demo_mode = false);
+    uint64_t remaining() const { return _size - _num_set; }
+
+    uint64_t size() const { return _size; }
+
+    EOceanType ocean_type() const { return _ocean_type; }
+
+    void set(uint64_t idx)
+    {
+        if ( idx >= _size )
+        {
+            throw _EXCEPTION("OceanByteSet :: set() :: Index out of range.");
+        }
+
+        set_internal( idx );
+    }
+
+    bool is_set(uint64_t idx) const
+    {
+        if ( idx >= _size )
+        {
+            throw _EXCEPTION("OceanByteSet :: is_set() :: Index out of range.");
+        }
+
+        return is_set_internal( idx );
+    }
+
+    void reset(uint64_t idx)
+    {
+        if ( idx >= _size )
+        {
+            throw _EXCEPTION("OceanByteSet :: reset() :: Index out of range.");
+        }
+
+        reset_internal( idx );
+    }
+
+    void vanish()
+    {
+        _size = 0;
+        _num_set = 0;
+        bits.vanish();
+    }
+
+private:
+
+    uint64_t _size = 0;
+    uint64_t _num_set = 0;
+    GhostVector<uint8_t> bits;
+    EOceanType _ocean_type = EOceanType::BYTES;
+
+    void set_internal(uint64_t idx)
+    {
+        _num_set = is_set_internal(idx) ? _num_set : _num_set + 1;
+
+        bits[idx / 8] |= (1 << (idx % 8));
+    }
+
+    bool is_set_internal(uint64_t idx) const
+    {
+        return bits[idx / 8] & (1 << (idx % 8));
+    }
+
+    void reset_internal(uint64_t idx)
+    {
+        _num_set = is_set_internal(idx) ? _num_set - 1: _num_set;
+
+        bits[idx / 8] &= ~(1 << (idx % 8));
+    }
+};
 
 }; // namespace HIDEAGEM_CORE
 

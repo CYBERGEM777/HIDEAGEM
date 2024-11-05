@@ -53,61 +53,107 @@
 // ▀                                                          ▀                              ▀
 // ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
 
-#pragma /* <3 */ once // upon a time ...
+#include "HIDEAGEM_UTILS.h"
+#include "EXCEPTION.h"
 
-#include <string>
-#include <vector>
-#include <cstdint>
+#include <array>
 
-#include "GEM_FILE.h"
-#include "GEM_OCEAN.h"
-#include "HIDEAGEM_ENUMS.h"
+#define UTF8PROC_STATIC
+#include <utf8proc.h>
 
 //
-//    HIDEAGEM CORE
+//    HIDEAGEM UTILS
 //
 
 namespace HIDEAGEM_CORE {
 
-///
-//    HIDEAGEM CORE API
 
-// Returns Gem Ocean (ocean with Gem Files embedded in it)
-// with valid data upon success and nullptr upon failure.
-//
-// NOTE: Creates a copy of ocean of size ocean_size bytes.
-GemOcean hide_gems(
-    int gem_protocol,
-    const void* ocean,
-    uint64_t ocean_size,
-    std::vector<GemFile>& gem_files,
-    const std::string& password,
-    int time_trap = static_cast<int>(ETimeTrapLevel::NONE),
-    bool b_validate = false
-);
+std::string bytes_to_size_string(const uint64_t size, const int max_unit_index, const bool b_decimal)
+{
+    constexpr std::array<const char*, 5> units = {" bytes", " KB", " MB", " GB", " TB"};
 
-GemOcean hide_gems(
-    int gem_protocol,
-    const void* ocean,
-    uint64_t ocean_size,
-    const std::vector<std::vector<std::string>>& file_paths,
-    const std::vector<std::string>& passwords,
-    const std::vector<int> time_traps,
-    bool b_validate = false
-);
+    int unit_index = 0;
+    uint64_t unit_size = size;
 
-std::vector<GemFile> find_gems(
-    const void* ocean,
-    uint64_t _ocean_size,
-    const std::vector<std::string>& passwords,
-    const std::string* output_dir = nullptr,
-    const std::vector<bool> time_traps = std::vector<bool>()
-);
+    while (unit_size >= 1024 && unit_index < max_unit_index && unit_index < units.size())
+    {
+        unit_size /= 1024;
+        ++unit_index;
+    }
 
-///
-//    DEBUG ZONE
+    if (unit_index == 0 || !b_decimal)
+    {
+        return std::to_string(unit_size) + units[unit_index];
+    }
 
-bool RUN_UNIT_TESTS(bool b_loop = false, bool b_demo_mode = false);
+    // Calculating integer and decimal parts for sizes in KB and above
+    uint64_t scale = 1;
+
+    for (int i = 0; i < unit_index; i++)
+    {
+        scale *= 1024;
+    }
+
+    uint64_t integer_part = size / scale;
+    uint64_t remainder = size % scale;
+    uint64_t decimal_part = (remainder * 100) / scale;
+
+    std::string formatted_size = std::to_string(integer_part);
+
+    if (decimal_part > 0)
+    {
+        formatted_size += std::string(".") + (decimal_part < 10 ? "0" : "") + std::to_string(decimal_part);
+    }
+    else
+    {
+        formatted_size += std::string(".00");
+    }
+
+    formatted_size += units[unit_index];
+
+    return formatted_size;
+}
+
+
+std::string int_to_base_26(uint64_t n)
+{
+    if (n == 0)
+    {
+        return "A";
+    }
+
+    std::string result = "";
+
+    while (n > 0)
+    {
+        char c = 'A' + (n % 26);
+        result = c + result;
+        n /= 26;
+    }
+
+    return result;
+}
+
+
+std::string normalize_unicode(const std::string& input)
+{
+    const utf8proc_uint8_t* input_data = reinterpret_cast<const utf8proc_uint8_t*>(input.c_str());
+    utf8proc_uint8_t* normalized_data = utf8proc_NFC(input_data);
+
+    if (normalized_data != nullptr)
+    {
+        // Convert the normalized data to a C++ string
+        const std::string normalized_string(reinterpret_cast<const char*>(normalized_data));
+
+        free(normalized_data);
+
+        return normalized_string;
+    }
+
+	// NOTE: nullptr is returned by utf8proc_NFC() if no change is needed to the string
+
+    return input;
+}
 
 }; // namespace HIDEAGEM_CORE
 

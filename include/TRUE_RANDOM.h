@@ -55,59 +55,51 @@
 
 #pragma /* <3 */ once // upon a time ...
 
-#include <string>
-#include <vector>
-#include <cstdint>
-
-#include "GEM_FILE.h"
-#include "GEM_OCEAN.h"
-#include "HIDEAGEM_ENUMS.h"
+#define SODIUM_STATIC = 1
+#include <sodium.h>
 
 //
-//    HIDEAGEM CORE
+//    TRUE RANDOM
 //
 
 namespace HIDEAGEM_CORE {
 
-///
-//    HIDEAGEM CORE API
+namespace TRUE_RANDOM {
 
-// Returns Gem Ocean (ocean with Gem Files embedded in it)
-// with valid data upon success and nullptr upon failure.
-//
-// NOTE: Creates a copy of ocean of size ocean_size bytes.
-GemOcean hide_gems(
-    int gem_protocol,
-    const void* ocean,
-    uint64_t ocean_size,
-    std::vector<GemFile>& gem_files,
-    const std::string& password,
-    int time_trap = static_cast<int>(ETimeTrapLevel::NONE),
-    bool b_validate = false
-);
+    template<typename T>
+    inline void rand_bytes(T* rand, size_t size)
+    {
+        if (sodium_init() < 0)
+        {
+            return;
+        }
 
-GemOcean hide_gems(
-    int gem_protocol,
-    const void* ocean,
-    uint64_t ocean_size,
-    const std::vector<std::vector<std::string>>& file_paths,
-    const std::vector<std::string>& passwords,
-    const std::vector<int> time_traps,
-    bool b_validate = false
-);
+        randombytes_buf(rand, size);
+    }
 
-std::vector<GemFile> find_gems(
-    const void* ocean,
-    uint64_t _ocean_size,
-    const std::vector<std::string>& passwords,
-    const std::string* output_dir = nullptr,
-    const std::vector<bool> time_traps = std::vector<bool>()
-);
+    template<typename T>
+    T rand()
+    {
+        T rand;
+        rand_bytes( &rand, sizeof(T) );
 
-///
-//    DEBUG ZONE
+        return rand;
+    }
 
-bool RUN_UNIT_TESTS(bool b_loop = false, bool b_demo_mode = false);
+    inline uint8_t rand_byte()
+    {
+        uint8_t rand;
+        rand_bytes(&rand, sizeof(rand));
+
+        return rand;
+    }
+
+    inline bool rand_bool()
+    {
+        return (rand_byte() & 1) == 1;
+    }
+
+}; // namespace TRUE_RANDOM
 
 }; // namespace HIDEAGEM_CORE
 

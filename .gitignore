@@ -5,6 +5,7 @@ __pycache__
 bin/
 builds/temp/
 builds/visual_studio/*/temp/
+builds/visual_studio/*/x64/
 
 *.dll
 *.exe
@@ -24,4 +25,5 @@ builds/visual_studio/*/temp/
 # Vim
 
 *.swp
+*.swo
 

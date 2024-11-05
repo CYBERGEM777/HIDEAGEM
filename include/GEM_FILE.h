@@ -56,58 +56,123 @@
 #pragma /* <3 */ once // upon a time ...
 
 #include <string>
-#include <vector>
-#include <cstdint>
 
-#include "GEM_FILE.h"
-#include "GEM_OCEAN.h"
-#include "HIDEAGEM_ENUMS.h"
+#define SODIUM_STATIC = 1
+#include <sodium.h>
+
+#include "EXCEPTION.h"
 
 //
-//    HIDEAGEM CORE
+//    GEM FILE
 //
 
 namespace HIDEAGEM_CORE {
 
-///
-//    HIDEAGEM CORE API
+class GemFile
+{
+public:
 
-// Returns Gem Ocean (ocean with Gem Files embedded in it)
-// with valid data upon success and nullptr upon failure.
-//
-// NOTE: Creates a copy of ocean of size ocean_size bytes.
-GemOcean hide_gems(
-    int gem_protocol,
-    const void* ocean,
-    uint64_t ocean_size,
-    std::vector<GemFile>& gem_files,
-    const std::string& password,
-    int time_trap = static_cast<int>(ETimeTrapLevel::NONE),
-    bool b_validate = false
-);
+    static constexpr uint8_t MAX_NAME_LEN = 255;
 
-GemOcean hide_gems(
-    int gem_protocol,
-    const void* ocean,
-    uint64_t ocean_size,
-    const std::vector<std::vector<std::string>>& file_paths,
-    const std::vector<std::string>& passwords,
-    const std::vector<int> time_traps,
-    bool b_validate = false
-);
+	// --
 
-std::vector<GemFile> find_gems(
-    const void* ocean,
-    uint64_t _ocean_size,
-    const std::vector<std::string>& passwords,
-    const std::string* output_dir = nullptr,
-    const std::vector<bool> time_traps = std::vector<bool>()
-);
+    GemFile(const uint64_t& _size);
 
-///
-//    DEBUG ZONE
+    GemFile(const uint8_t* copy_data, const uint64_t& copy_size, const char* copy_name = "", bool b_pack = false);
 
-bool RUN_UNIT_TESTS(bool b_loop = false, bool b_demo_mode = false);
+    GemFile(const std::string& file_path, bool b_pack = false);
+
+    // Move constructor
+    GemFile(GemFile&& other) noexcept
+    : _data(other.data())
+    , pack_state(other.pack_state)
+    , b_locked(other.b_locked)
+    , b_data_init(other.b_data_init)
+    , _name(other._name)
+    , data_size(other.data_size)
+    {
+        other._data = nullptr;
+        other.b_locked = false;
+        other.b_data_init = false;
+        sodium_memzero(reinterpret_cast<void*>(other._name.data()), other._name.size());
+        other._name.clear();
+        sodium_memzero(reinterpret_cast<void*>(&other.data_size), sizeof(other.data_size));
+    }
+
+    virtual ~GemFile()
+    {
+        vanish();
+    }
+
+    const std::string& name() const { return _name; }
+
+    uint8_t* data() { return _data; }
+
+    const uint8_t* data() const { return _data; }
+
+    uint64_t size() const { return data_size; }
+
+    void set_name(const std::string& __name)
+    {
+        _name = __name;
+    }
+
+    void init_data(const uint64_t& _size);
+
+    void resize(const size_t& new_size);
+
+    // Locks data read-only
+    bool lock();
+
+    // Packs filename size and filename in place.
+    //
+    // Returns true if data gets packed or is already packed.
+    bool pack();
+
+    // Unpacks filename from data in place;
+    //
+    // If b_force is true will unpack even if pack_state != PACKED.
+    //
+    // Returns true if data gets unpacked or is already unpacked,
+    // and if pack_state == NONE and b_force is false;
+    bool unpack(const bool b_force = false);
+
+    bool is_valid() const { return _data != nullptr && data_size > 0; }
+
+    void vanish();
+
+private:
+
+    enum class PackState : uint8_t
+    {
+        NONE     = 0,
+        PACKED   = 1,
+        UNPACKED = 2,
+    };
+
+    // ---
+
+    std::string _name;
+
+    uint8_t* _data = nullptr;
+
+    PackState pack_state = PackState::NONE;
+
+    bool b_locked    = false; // True if data has been locked
+    bool b_data_init = false; // True if data has been initialized
+
+    size_t data_size = 0; // File size in bytes
+
+    // Delete copy constructor and assignment operator
+    GemFile(const GemFile&) = delete;
+    GemFile& operator=(const GemFile&) = delete;
+
+    // ---
+
+    void read_binary_file(const std::string& file_path);
+
+    static void free_data(uint8_t*& fdata);
+};
 
 }; // namespace HIDEAGEM_CORE
 

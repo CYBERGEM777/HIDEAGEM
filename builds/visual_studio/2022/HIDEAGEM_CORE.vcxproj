@@ -19,10 +19,38 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\..\include\BIT_COLLECTOR.h" />
+    <ClInclude Include="..\..\..\include\BIT_STREAM.h" />
+    <ClInclude Include="..\..\..\include\COMPRESSION_UTILS.h" />
+    <ClInclude Include="..\..\..\include\CYCLE_KEY.h" />
+    <ClInclude Include="..\..\..\include\DRAGON_RNG.h" />
+    <ClInclude Include="..\..\..\include\EXCEPTION.h" />
+    <ClInclude Include="..\..\..\include\GEM_FILE.h" />
+    <ClInclude Include="..\..\..\include\GEM_OCEAN.h" />
+    <ClInclude Include="..\..\..\include\GEM_PROTOCOL.h" />
+    <ClInclude Include="..\..\..\include\GHOST_VECTOR.h" />
+    <ClInclude Include="..\..\..\include\HIDEAGEM.h" />
+    <ClInclude Include="..\..\..\include\HIDEAGEM_CONSTANTS.h" />
     <ClInclude Include="..\..\..\include\HIDEAGEM_CORE.h" />
+    <ClInclude Include="..\..\..\include\HIDEAGEM_C_WRAPPER.h" />
+    <ClInclude Include="..\..\..\include\HIDEAGEM_ENUMS.h" />
+    <ClInclude Include="..\..\..\include\HIDEAGEM_UTILS.h" />
+    <ClInclude Include="..\..\..\include\OCEAN_BYTE_SET.h" />
+    <ClInclude Include="..\..\..\include\TERMINAL_UTILS.h" />
+    <ClInclude Include="..\..\..\include\TRUE_RANDOM.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\..\..\src\COMPRESSION_UTILS.cpp" />
+    <ClCompile Include="..\..\..\src\CYCLE_KEY.cpp" />
+    <ClCompile Include="..\..\..\src\DRAGON_RNG.cpp" />
+    <ClCompile Include="..\..\..\src\GEM_FILE.cpp" />
+    <ClCompile Include="..\..\..\src\GEM_OCEAN.cpp" />
+    <ClCompile Include="..\..\..\src\GEM_PROTOCOL.cpp" />
+    <ClCompile Include="..\..\..\src\HIDEAGEM.cpp" />
     <ClCompile Include="..\..\..\src\HIDEAGEM_CORE.cpp" />
+    <ClCompile Include="..\..\..\src\HIDEAGEM_C_WRAPPER.cpp" />
+    <ClCompile Include="..\..\..\src\HIDEAGEM_UTILS.cpp" />
+    <ClCompile Include="..\..\..\src\TERMINAL_UTILS.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>

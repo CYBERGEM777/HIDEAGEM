@@ -55,59 +55,29 @@
 
 #pragma /* <3 */ once // upon a time ...
 
+#include <map>
 #include <string>
-#include <vector>
-#include <cstdint>
 
-#include "GEM_FILE.h"
-#include "GEM_OCEAN.h"
 #include "HIDEAGEM_ENUMS.h"
 
 //
-//    HIDEAGEM CORE
+//    GEM PROTOCOL
 //
 
 namespace HIDEAGEM_CORE {
 
-///
-//    HIDEAGEM CORE API
+struct GemProtocol
+{
+    std::string NAME = "NONE";
+};
 
-// Returns Gem Ocean (ocean with Gem Files embedded in it)
-// with valid data upon success and nullptr upon failure.
-//
-// NOTE: Creates a copy of ocean of size ocean_size bytes.
-GemOcean hide_gems(
-    int gem_protocol,
-    const void* ocean,
-    uint64_t ocean_size,
-    std::vector<GemFile>& gem_files,
-    const std::string& password,
-    int time_trap = static_cast<int>(ETimeTrapLevel::NONE),
-    bool b_validate = false
-);
+inline const std::map<EGemProtocolKey, GemProtocol> GEM_PROTOCOLS
+{
+    { EGemProtocolKey::GEMMA_RANDOM,   { "GEMMA RANDOM"} },
+    { EGemProtocolKey::RUBY_TIME_TRAP, { "RUBY TIME TRAP"} },
+};
 
-GemOcean hide_gems(
-    int gem_protocol,
-    const void* ocean,
-    uint64_t ocean_size,
-    const std::vector<std::vector<std::string>>& file_paths,
-    const std::vector<std::string>& passwords,
-    const std::vector<int> time_traps,
-    bool b_validate = false
-);
-
-std::vector<GemFile> find_gems(
-    const void* ocean,
-    uint64_t _ocean_size,
-    const std::vector<std::string>& passwords,
-    const std::string* output_dir = nullptr,
-    const std::vector<bool> time_traps = std::vector<bool>()
-);
-
-///
-//    DEBUG ZONE
-
-bool RUN_UNIT_TESTS(bool b_loop = false, bool b_demo_mode = false);
+bool get_gem_protocol(const EGemProtocolKey gem_protocol, GemProtocol& out_protocol);
 
 }; // namespace HIDEAGEM_CORE
 

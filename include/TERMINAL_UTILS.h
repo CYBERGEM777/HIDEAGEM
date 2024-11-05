@@ -55,59 +55,52 @@
 
 #pragma /* <3 */ once // upon a time ...
 
+#include <map>
 #include <string>
-#include <vector>
-#include <cstdint>
+#include <csignal>
 
-#include "GEM_FILE.h"
-#include "GEM_OCEAN.h"
-#include "HIDEAGEM_ENUMS.h"
+#include "EXCEPTION.h"
 
 //
-//    HIDEAGEM CORE
+//    TERMINAL UTILS
 //
 
 namespace HIDEAGEM_CORE {
 
 ///
-//    HIDEAGEM CORE API
+//    SIGNALS INTELLIGENCE
 
-// Returns Gem Ocean (ocean with Gem Files embedded in it)
-// with valid data upon success and nullptr upon failure.
-//
-// NOTE: Creates a copy of ocean of size ocean_size bytes.
-GemOcean hide_gems(
-    int gem_protocol,
-    const void* ocean,
-    uint64_t ocean_size,
-    std::vector<GemFile>& gem_files,
-    const std::string& password,
-    int time_trap = static_cast<int>(ETimeTrapLevel::NONE),
-    bool b_validate = false
-);
+extern bool EXIT_SIGNAL;
 
-GemOcean hide_gems(
-    int gem_protocol,
-    const void* ocean,
-    uint64_t ocean_size,
-    const std::vector<std::vector<std::string>>& file_paths,
-    const std::vector<std::string>& passwords,
-    const std::vector<int> time_traps,
-    bool b_validate = false
-);
+void EXIT_SIGNAL_WATCHER( int signal );
 
-std::vector<GemFile> find_gems(
-    const void* ocean,
-    uint64_t _ocean_size,
-    const std::vector<std::string>& passwords,
-    const std::string* output_dir = nullptr,
-    const std::vector<bool> time_traps = std::vector<bool>()
-);
+#define INIT_SIGNAL_WATCHERS() std::signal(SIGINT, EXIT_SIGNAL_WATCHER);
+
+#define EXIT_WARDEN() if ( EXIT_SIGNAL ) { \
+    ERROR_CODE = EGemErrorCode::EXIT_SIGNAL;\
+    throw _EXCEPTION( "\n\n \033[93m>>> E X I T  S I G N A L <<<\033[0m" ); }
 
 ///
-//    DEBUG ZONE
+//    PRINTING
 
-bool RUN_UNIT_TESTS(bool b_loop = false, bool b_demo_mode = false);
+extern std::map<std::string, const char*> TERM_COLORS;
+
+void WRITE_STD_OUT(const char* str, va_list args);
+void PRINT(const char* str, va_list args);
+void PRINT(const char* str, ...);
+void PRINT_COLOR(const std::string& color, const char* str, ...);
+void PRINT_COLOR(const std::string& color, const char* str, va_list args);
+void PRINT_SUCCESS(const char* str, ...);
+void PRINT_WARNING(const char* str, ...);
+void PRINT_ERROR(const char* str, ...);
+void PRINT_NO_NEWLINE(const char* str, ...);
+void PRINT_SAME_LINE(const char* str, ...);
+void PRINT_SAME_LINE_COLOR(const std::string& color, const char* str, ...);
+void HIDE_TERM_CURSOR();
+void SHOW_TERM_CURSOR();
+void RESET_TERM_CURSOR();
+bool STDIN_YES_OR_NO();
+void PRINT_SPLASH_SCREEN();
 
 }; // namespace HIDEAGEM_CORE
 

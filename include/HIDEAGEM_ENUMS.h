@@ -55,59 +55,97 @@
 
 #pragma /* <3 */ once // upon a time ...
 
-#include <string>
-#include <vector>
+#include <limits>
 #include <cstdint>
 
-#include "GEM_FILE.h"
-#include "GEM_OCEAN.h"
-#include "HIDEAGEM_ENUMS.h"
-
 //
-//    HIDEAGEM CORE
+//    HIDEAGEM ENUMS
 //
 
 namespace HIDEAGEM_CORE {
 
 ///
-//    HIDEAGEM CORE API
+//    ERROR CODES
 
-// Returns Gem Ocean (ocean with Gem Files embedded in it)
-// with valid data upon success and nullptr upon failure.
-//
-// NOTE: Creates a copy of ocean of size ocean_size bytes.
-GemOcean hide_gems(
-    int gem_protocol,
-    const void* ocean,
-    uint64_t ocean_size,
-    std::vector<GemFile>& gem_files,
-    const std::string& password,
-    int time_trap = static_cast<int>(ETimeTrapLevel::NONE),
-    bool b_validate = false
-);
-
-GemOcean hide_gems(
-    int gem_protocol,
-    const void* ocean,
-    uint64_t ocean_size,
-    const std::vector<std::vector<std::string>>& file_paths,
-    const std::vector<std::string>& passwords,
-    const std::vector<int> time_traps,
-    bool b_validate = false
-);
-
-std::vector<GemFile> find_gems(
-    const void* ocean,
-    uint64_t _ocean_size,
-    const std::vector<std::string>& passwords,
-    const std::string* output_dir = nullptr,
-    const std::vector<bool> time_traps = std::vector<bool>()
-);
+enum class EGemErrorCode
+{
+    NONE,
+    UNKNOWN,
+    DEAD_END,
+    EXIT_SIGNAL,
+    BAD_ARGUMENT,
+    NOT_PRISTINE,
+    INVALID_OCEAN,
+    NOT_ENOUGH_SPACE,
+    GEM_VALIDATION_FAILED,
+    INVALID_TIME_TRAP_LEVEL,
+    GEM_STREAM_DECOMPRESSION_ABORTED,
+};
 
 ///
-//    DEBUG ZONE
+//    BIT MODE
 
-bool RUN_UNIT_TESTS(bool b_loop = false, bool b_demo_mode = false);
+enum EBitMode
+{
+    NONE = 0,
+
+    _1_BIT  = 1,
+    _2_BIT  = 2,
+    _3_BIT  = 3,
+    _4_BIT  = 4,
+    _5_BIT  = 5,
+    _6_BIT  = 6,
+    _7_BIT  = 7,
+    _8_BIT  = 8,
+
+    MAX = 8,
+};
+
+///
+//    GEM OCEAN
+
+enum EOceanType
+{
+    BYTES           = 0,
+    IMAGE_GRAYSCALE = 1,
+    IMAGE_RGB       = 3,
+    IMAGE_RGBA      = 4,
+};
+
+///
+//    GEM PROTOCOL KEY (16 BIT)
+
+enum class EGemProtocolKey : int16_t
+{
+    //
+    //    ***  PERMANENT CONSTANTS ***
+    //
+
+    AUTO           = 0,
+    GEMMA_RANDOM   = 1,
+    RUBY_TIME_TRAP = 2,
+
+    NONE = std::numeric_limits<int16_t>::min(),
+};
+
+///
+//    TIME TRAP LEVEL
+
+enum class ETimeTrapLevel : int8_t
+{
+    NONE  = -1,
+    ZERO  =  0,
+    ONE   =  1,
+    TWO   =  2,
+    THREE =  3,
+    FOUR  =  4,
+    FIVE  =  5,
+    SIX   =  6,
+    SEVEN =  7,
+
+    MIN   =  0,
+    MAX   =  7,
+};
 
 }; // namespace HIDEAGEM_CORE
 

@@ -55,59 +55,243 @@
 
 #pragma /* <3 */ once // upon a time ...
 
-#include <string>
 #include <vector>
-#include <cstdint>
 
-#include "GEM_FILE.h"
-#include "GEM_OCEAN.h"
-#include "HIDEAGEM_ENUMS.h"
+#define SODIUM_STATIC = 1
+#include <sodium.h>
+
+#include "EXCEPTION.h"
 
 //
-//    HIDEAGEM CORE
+//    GHOST VECTOR
 //
+//    Securely erases trivially destructible types, such as int, float, bool etc.
+//    when erasing and popping elements, and upon destruction.
 
 namespace HIDEAGEM_CORE {
 
-///
-//    HIDEAGEM CORE API
+template <typename T>
+class GhostVector
+{
+public:
 
-// Returns Gem Ocean (ocean with Gem Files embedded in it)
-// with valid data upon success and nullptr upon failure.
-//
-// NOTE: Creates a copy of ocean of size ocean_size bytes.
-GemOcean hide_gems(
-    int gem_protocol,
-    const void* ocean,
-    uint64_t ocean_size,
-    std::vector<GemFile>& gem_files,
-    const std::string& password,
-    int time_trap = static_cast<int>(ETimeTrapLevel::NONE),
-    bool b_validate = false
-);
+    using iterator       = typename std::vector<T>::iterator;
+    using const_iterator = typename std::vector<T>::const_iterator;
 
-GemOcean hide_gems(
-    int gem_protocol,
-    const void* ocean,
-    uint64_t ocean_size,
-    const std::vector<std::vector<std::string>>& file_paths,
-    const std::vector<std::string>& passwords,
-    const std::vector<int> time_traps,
-    bool b_validate = false
-);
+    GhostVector() {}
 
-std::vector<GemFile> find_gems(
-    const void* ocean,
-    uint64_t _ocean_size,
-    const std::vector<std::string>& passwords,
-    const std::string* output_dir = nullptr,
-    const std::vector<bool> time_traps = std::vector<bool>()
-);
+    GhostVector(size_t size) : vec(size) {}
 
-///
-//    DEBUG ZONE
+    GhostVector(size_t size, T init) : vec(size, init) {}
 
-bool RUN_UNIT_TESTS(bool b_loop = false, bool b_demo_mode = false);
+    GhostVector(std::initializer_list<T> initList) : vec(initList) {}
+
+    template <class InputIterator>
+    GhostVector(InputIterator first, InputIterator last) : vec(first, last) {}
+
+    ~GhostVector()
+    {
+        secure_erase();
+    }
+
+    void push_back(const T& t) { vec.push_back(t); }
+
+    void pop_back()
+    {
+        if constexpr (std::is_trivially_destructible<T>::value)
+        {
+            if (sodium_init() < 0)
+            {
+                throw _EXCEPTION("Failed to pop_back() GhostVector: libsodium could not be initialized.");
+            }
+
+            sodium_memzero(&back(), sizeof(T));
+        }
+
+        vec.pop_back();
+    }
+
+    T& front() { return vec.front(); }
+    T& back()  { return vec.back();  }
+
+    const T& front() const { return vec.front(); }
+    const T& back()  const { return vec.back();  }
+
+    T* data() { return vec.data(); }
+    const T* data() const { return vec.data(); }
+
+    void reserve(size_t size)
+    {
+        vec.reserve(size);
+    }
+
+    size_t size() const { return vec.size(); }
+
+    void resize(size_t count)
+    {
+        if (count < vec.size())
+        {
+            secure_erase_from(count);
+        }
+
+        vec.resize(count);
+    }
+
+    void resize(size_t count, const T& value)
+    {
+        if (count < vec.size())
+        {
+            secure_erase_from(count);
+        }
+
+        vec.resize(count, value);
+    }
+
+    bool empty() const { return vec.empty(); }
+
+    iterator erase(iterator pos)
+    {
+        if constexpr (std::is_trivially_destructible<T>::value)
+        {
+            if (sodium_init() < 0)
+            {
+                throw _EXCEPTION("Failed to erase() GhostVector: libsodium could not be initialized.");
+            }
+
+            sodium_memzero(&*pos, sizeof(T));
+        }
+
+        return vec.erase(pos);
+    }
+
+    void clear()
+    {
+        secure_erase();
+        vec.clear();
+    }
+
+    void vanish()
+    {
+        clear();
+        std::vector<T>().swap( vec );
+    }
+
+    std::vector<T>& vector() { return vec; }
+
+    ///
+    //    Read / write bytes from vector
+
+    template<typename U>
+    void append_bytes(U value)
+    {
+        for (int i = 0; i < sizeof(U); ++i)
+        {
+            uint8_t byte = static_cast<uint8_t>(value & 0xFF);
+            push_back(byte);
+            value >>= 8;
+        }
+    }
+
+    template<typename U>
+    void write_bytes_at(U value, size_t index)
+    {
+        if ( index + sizeof(U) >= size() )
+        {
+            throw _EXCEPTION("ERROR: GhostVector::write_bytes_at() :: Write operation exceeds vector size.");
+        }
+
+        for (int i = 0; i < sizeof(U); ++i)
+        {
+            (*this)[ index + i ] = static_cast<uint8_t>(value & 0xFF);
+            value >>= 8;
+        }
+    }
+
+    template<typename U>
+    void read_bytes(U& out, size_t start) const
+    {
+        out = 0;
+        for (int i = 0; i < sizeof(U); ++i)
+        {
+            uint64_t byte = (*this)[start + i];
+            out |= (byte << (i * 8));
+        }
+    }
+
+    iterator begin()
+    {
+        return vec.begin();
+    }
+
+    const_iterator begin() const
+    {
+        return vec.begin();
+    }
+
+    iterator end()
+    {
+        return vec.end();
+    }
+
+    const_iterator end() const
+    {
+        return vec.end();
+    }
+
+    T& operator[](size_t index)
+    {
+        return vec[index];
+    }
+
+    const T& operator[](size_t index) const
+    {
+        return vec[index];
+    }
+
+    GhostVector& operator=(std::initializer_list<T> init_list)
+    {
+        secure_erase();
+        vec = init_list;
+
+        return *this;
+    }
+
+private:
+
+    std::vector<T> vec;
+
+    void secure_erase()
+    {
+        if (sodium_init() < 0)
+        {
+            throw _EXCEPTION("Failed to secure erase GhostVector: libsodium could not be initialized.");
+        }
+
+        // Secure erase trivially destructible element types
+        if constexpr (std::is_trivially_destructible<T>::value)
+        {
+            sodium_memzero(vec.data(), vec.size() * sizeof(T));
+        }
+
+        // TODO warn when not trivially destructible
+
+        vec.resize(0); // This will call destructors
+    }
+
+    void secure_erase_from(size_t start_index)
+    {
+        if (sodium_init() < 0)
+        {
+            throw _EXCEPTION("Failed to secure erase GhostVector: libsodium could not be initialized.");
+        }
+
+        if ( start_index < vec.size() )
+        {
+            size_t bytes_to_erase = (vec.size() - start_index) * sizeof(T);
+            sodium_memzero(vec.data() + start_index, bytes_to_erase);
+        }
+    }
+};
 
 }; // namespace HIDEAGEM_CORE
 

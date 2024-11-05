@@ -38,7 +38,7 @@ INCLUDES = -I./include \
            -I./$(STB_DIR)
 
 # Source and target
-SOURCE = src/HIDEAGEM_CORE.cpp
+SOURCE = $(wildcard src/*.cpp)
 TARGET = $(OUTPUT_DIR)HIDEAGEM.so
 WASM_TARGET = $(WASM_OUTPUT_DIR)HIDEAGEM.js
 PACKAGE = HIDEAGEM_Linux64.tar.gz
